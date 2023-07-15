@@ -1,0 +1,1803 @@
+---
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+# 20210608_SS2_LY         
+tissues final comparison              
+mod20220117        
+             
+             
+samples after filtering:             
+              
+tissues               
+              
+BM_1/2/3       
+Blood_1/2/3/4       
+SP_1/2/3/4             
+Lung_1/2/3          
+Skin_1/2/4          
+Colon_1/2/4         
+SI_1/2/3/4          
+          
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#necessary packages and functions  
+source("I:/Shared_win/projects/RNA_normal/analysis.r")
+```
+
+
+
+## load processed data            
+
+##### TPM matrix         
+
+```{r}
+matt_pc <- read.table("../tissues_DEGs/RNAseq.SS2_LY_20210608_mod20220117.filt_tpm.tissues.pc_gene.csv", header = T, sep = ",")
+rownames(matt_pc) <- matt_pc$gene
+matt_pc <- matt_pc[,2:ncol(matt_pc)]
+matt_pc <- as.matrix(matt_pc)
+
+idx.BM <- grep("BM",colnames(matt_pc))
+idx.Blood <- grep("Blood",colnames(matt_pc))
+idx.SP <- grep("SP",colnames(matt_pc))
+idx.Lung <- grep("Lung",colnames(matt_pc))
+idx.Skin <- grep("Skin",colnames(matt_pc))
+idx.Colon <- grep("Colon",colnames(matt_pc))
+idx.SI <- grep("SI",colnames(matt_pc))
+```
+
+```{r paged.print=FALSE}
+dim(matt_pc)
+head(matt_pc)
+```
+
+### clustering           
+
+#### PCA       
+
+```{r echo=FALSE}
+cnts <- c(rep("BM",length(idx.BM)),
+          rep("Blood",length(idx.Blood)),
+          rep("SP",length(idx.SP)),
+          rep("Lung",length(idx.Lung)),
+          rep("Skin",length(idx.Skin)),
+          rep("Colon",length(idx.Colon)),
+          rep("SI",length(idx.SI)))
+cnts <- factor(cnts,levels = c("BM","Blood","SP","Lung","Skin","Colon","SI"))
+bats <- colnames(matt_pc)[c(idx.BM,
+                            idx.Blood,
+                            idx.SP,
+                            idx.Lung,
+                            idx.Skin,
+                            idx.Colon,
+                            idx.SI)]
+reps <- c(1:length(idx.BM),
+          1:length(idx.Blood),
+          1:length(idx.SP),
+          1:length(idx.Lung),
+          1:length(idx.Skin),
+          1:length(idx.Colon),
+          1:length(idx.SI))
+
+# variable genes
+rv <- rowVars(matt_pc[,c(idx.BM,
+                            idx.Blood,
+                            idx.SP,
+                            idx.Lung,
+                            idx.Skin,
+                            idx.Colon,
+                            idx.SI)])
+selt <- order(rv, decreasing = TRUE)[seq_len(2000)]
+
+#calculate principal components for the uncorrected data
+pca_obj = prcomp(t(matt_pc[selt,c(idx.BM,
+                            idx.Blood,
+                            idx.SP,
+                            idx.Lung,
+                            idx.Skin,
+                            idx.Colon,
+                            idx.SI)]), scale.=TRUE, center = TRUE)
+
+#pull PCA values out of the PCA object
+pca_d = as.data.frame(pca_obj$x)
+
+#assign labels to the data frame
+pca_d[,"condition"] = cnts
+pca_d[,"batch"] = bats
+pca_d[,"replicate"] = reps
+```
+
+
+
+```{r echo=FALSE, fig.height=7.2, fig.width=8, message=FALSE, warning=FALSE}
+cols <- c("#800000","#FF8080",
+          "#E175FD","#FF8000",
+          "#76D180","#004080",
+          "#0080FF")
+names(cols) <- unique(cnts)
+
+centroids <- aggregate(cbind(PC1,PC2)~condition,pca_d,mean)
+conf.rgn <- do.call(rbind,lapply(unique(pca_d$condition),function(t)
+  data.frame(condition=as.character(t),
+             ellipse::ellipse(cov(pca_d[pca_d$condition==t,1:2]),
+                     centre=as.matrix(centroids[t,2:3]),
+                     level=0.95),
+             stringsAsFactors = FALSE)))
+
+p1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition))
+p1 = p1 + geom_point(size=3.5)
+p1 = p1 + ggrepel::geom_text_repel(mapping = aes(label=bats),size=3.5, max.overlaps = 20,show.legend = F)
+#p1 = p1 + stat_ellipse(type="norm", linetype=2)
+p1 = p1 + geom_path(data=conf.rgn)
+p1 = p1 + labs(title="PCA\n(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p1 = p1 + scale_colour_manual(values = cols) 
+
+p1
+```
+```{r eval=FALSE, include=FALSE}
+ggsave("./TissueSpecific/PCA12_tissues_ID.pdf",
+       plot = p1,
+       width = 8,
+       height = 7.2)
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=8, message=FALSE, warning=FALSE}
+p1.1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition))
+p1.1 = p1.1 + geom_point(size=3.5)
+#p1.1 = p1.1 + ggrepel::geom_text_repel(mapping = aes(label=bats),size=3.5, max.overlaps = 20,show.legend = F)
+#p1.1 = p1.1 + stat_ellipse(type="norm", linetype=2)
+p1.1 = p1.1 + geom_path(data=conf.rgn)
+p1.1 = p1.1 + labs(title="PCA\n(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p1.1 = p1.1 + scale_colour_manual(values = cols) + theme_classic()
+
+p1.1
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./TissueSpecific/PCA12_tissues_noID.pdf",
+       plot = p1.1,
+       width = 8,
+       height = 7.2)
+```
+
+
+#### tSNE           
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8,fig.height=7.2}
+set.seed(122)
+PCs <- 1:12
+PCss <- paste0(PCs[1],":",PCs[length(PCs)])
+pca.emb <- pca_obj$x %*% diag(pca_obj$sdev**2)
+
+tsne_out <- Rtsne::Rtsne(
+  as.matrix(pca.emb[,PCs]),
+  pca = FALSE,
+  perplexity = 3,
+  max_iter = 2000
+)
+tsne.emb <- data.frame(tsne_out$Y)
+tsne.emb[,"condition"] = cnts
+tsne.emb[,"batch"] = bats
+tsne.emb[,"replicate"] = reps
+
+centroids <- aggregate(cbind(X1,X2)~condition,tsne.emb,mean)
+conf.rgn <- do.call(rbind,lapply(unique(tsne.emb$condition),function(t)
+  data.frame(condition=as.character(t),
+             ellipse::ellipse(cov(tsne.emb[tsne.emb$condition==t,1:2]),
+                     centre=as.matrix(centroids[t,2:3]),
+                     level=0.95),
+             stringsAsFactors = FALSE)))
+
+#plot the tSNE
+p4 = ggplot(data=tsne.emb, aes(x=X1, y=X2, color=condition))
+p4 = p4 + geom_point(size=3.2)
+p4 = p4 + ggrepel::geom_text_repel(mapping = aes(label=bats),size=3.5,show.legend = F)
+#p4 = p4 + stat_ellipse(type="norm", linetype=2)
+p4 = p4 + geom_path(data=conf.rgn)
+p4 = p4 + labs(x="tSNE_1",y="tSNE_2",
+               title=paste0("tSNE\nusing PC",PCss),
+               color="Condition", shape="batch")
+p4 = p4 + scale_colour_manual(values = cols) 
+#p4 = p4 + scale_shape_manual(values=c(16,17,15))
+p4
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./TissueSpecific/tSNE_tissues_ID.pdf",
+       plot = p4,
+       width = 8,
+       height = 7.2)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8,fig.height=7.2}
+#plot the tSNE
+p4.1 = ggplot(data=tsne.emb, aes(x=X1, y=X2, color=condition))
+p4.1 = p4.1 + geom_point(size=3.5)
+#p4.1 = p4.1 + ggrepel::geom_text_repel(mapping = aes(label=bats),size=3.5,show.legend = F)
+#p4.1 = p4.1 + stat_ellipse(type="norm", linetype=2)
+p4.1 = p4.1 + geom_path(data=conf.rgn)
+p4.1 = p4.1 + labs(x="tSNE_1",y="tSNE_2",
+               title=paste0("tSNE\nusing PC",PCss),
+               color="Condition", shape="batch")
+p4.1 = p4.1 + scale_colour_manual(values = cols) + theme_classic()
+#p4.1 = p4.1 + scale_shape_manual(values=c(16,17,15))
+p4.1
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./TissueSpecific/tSNE_tissues_noID.pdf",
+       plot = p4.1,
+       width = 8,
+       height = 7.2)
+
+ggsave("./TissueSpecific/tSNE_tissues_noID.small.pdf",
+       plot = p4.1,
+       width = 6,
+       height = 5.4)
+```
+
+#### correlation         
+
+##### correlation of all filtered protein-coding genes, grouping by correlation      
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=5.2,fig.height=5.2}
+  Ret_mat <- log2(matt_pc[,]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.6
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot1 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./TissueSpecific/correlation.all_filtered_protein_coding.pdf",
+    height = 5.2, width = 5.2)
+heatplot1
+dev.off()
+```
+
+##### correlation of top2000 highly variable genes           
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=5.2,fig.height=5.2}
+  Ret_mat <- log2(matt_pc[selt,]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.35
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot2 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./TissueSpecific/correlation.top2k_hvg.pdf",
+    height = 5.2, width = 5.2)
+heatplot2
+dev.off()
+```
+
+### DEGs             
+
+```{r}
+mark_rowname <- function(DEGs){
+  rownames(DEGs) <- DEGs$gene
+  return(DEGs)
+}
+
+DEGs.BM <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a1_BM_vs_nonBM.csv",
+                                   header = T, sep = ","))
+DEGs.Blood <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a2_Blood_vs_nonBlood.csv",
+                                      header = T, sep = ","))
+DEGs.SP <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a3_SP_vs_nonSP.csv",
+                                      header = T, sep = ","))
+DEGs.Lung <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a4_Lung_vs_nonLung.csv",
+                                     header = T, sep = ","))
+DEGs.Skin <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a5_Skin_vs_nonSkin.csv",
+                                     header = T, sep = ","))
+DEGs.Colon <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a6_Colon_vs_nonColon.csv",
+                                      header = T, sep = ","))
+DEGs.SI <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a7_SI_vs_nonSI.csv",
+                                   header = T, sep = ","))
+
+DEGs.SPBlood <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a81_SPBlood_vs_nonSPBlood.csv",
+                                        header = T, sep = ","))
+DEGs.ColonSkin <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a82_ColonSkin_vs_nonColonSkin.csv",
+                                          header = T, sep = ","))
+DEGs.ColonSI <- mark_rowname(read.table("../tissues_DEGs/edgeR_DEGs.tissues_a83_ColonSI_vs_nonColonSI.csv",
+                                        header = T, sep = ","))
+
+```
+
+## comparison         
+
+```{r echo=FALSE}
+proc_DEG <- function(deg, p.cut=0.05, FC.cut = 2, padj=TRUE, abs=TRUE, mat_cut=NULL, gene_cut=NULL){
+    rownames(deg) <- deg$gene
+    
+    if(padj==TRUE){
+        deg <- deg %>% filter(padj < p.cut)
+    }else{
+        deg <- deg %>% filter(pvalue < p.cut)
+    }
+    
+    if(abs==TRUE){
+        deg <- deg %>% filter(abs(FC) > FC.cut)
+    }else if(FC.cut >0){
+        deg <- deg %>% filter(FC > FC.cut)
+    }else{
+        deg <- deg %>% filter(FC < FC.cut)
+    }
+    
+    if(!is.null(mat_cut)){
+        deg <- deg[rownames(deg) %in% rownames(mat_cut),]
+    }
+    if(!is.null(gene_cut)){
+        deg <- deg[rownames(deg) %in% gene_cut,]
+    }
+    return(deg)
+}
+```
+
+
+```{r include=FALSE}
+color.tissue <- c("#800000","#FF8080",
+                  "#E175FD","#FF8000",
+                  "#76D180","#004080",
+                  "#0080FF")
+```
+
+### cutoffs to overlap          
+
+#### TPM      
+TPM > 4 in at least one tissue (average expression)           
+
+```{r include=FALSE}
+#
+cut_tpm <- 4
+
+#
+matt_pc.cut <- matt_pc
+matt_pc.cut <- matt_pc.cut[rowMeans(matt_pc.cut[,idx.BM]) > cut_tpm |
+                             rowMeans(matt_pc.cut[,idx.Blood]) > cut_tpm |
+                             rowMeans(matt_pc.cut[,idx.SP]) > cut_tpm |
+                             rowMeans(matt_pc.cut[,idx.Lung]) > cut_tpm |
+                             rowMeans(matt_pc.cut[,idx.Skin]) > cut_tpm |
+                             rowMeans(matt_pc.cut[,idx.Colon]) > cut_tpm |
+                             rowMeans(matt_pc.cut[,idx.SI]) > cut_tpm,]
+
+```
+
+```{r paged.print=FALSE}
+dim(matt_pc.cut)
+head(matt_pc.cut)
+```
+
+#### DEGs       
+
+##### p.adj < 0.05, FC > 1.5        
+
+```{r include=FALSE}
+#
+p.cut <- 0.05
+FC.cut <- 1.5
+
+DEG.BM.up <- proc_DEG(DEGs.BM, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.BM.dn <- proc_DEG(DEGs.BM, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Blood.up <- proc_DEG(DEGs.Blood, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Blood.dn <- proc_DEG(DEGs.Blood, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.SP.up <- proc_DEG(DEGs.SP, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.SP.dn <- proc_DEG(DEGs.SP, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Lung.up <- proc_DEG(DEGs.Lung, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Lung.dn <- proc_DEG(DEGs.Lung, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Skin.up <- proc_DEG(DEGs.Skin, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Skin.dn <- proc_DEG(DEGs.Skin, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Colon.up <- proc_DEG(DEGs.Colon, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.Colon.dn <- proc_DEG(DEGs.Colon, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.SI.up <- proc_DEG(DEGs.SI, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.SI.dn <- proc_DEG(DEGs.SI, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+
+DEG.SPBlood.up <- proc_DEG(DEGs.SPBlood, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.SPBlood.dn <- proc_DEG(DEGs.SPBlood, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.ColonSkin.up <- proc_DEG(DEGs.ColonSkin, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.ColonSkin.dn <- proc_DEG(DEGs.ColonSkin, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.ColonSI.up <- proc_DEG(DEGs.ColonSI, p.cut = p.cut, FC.cut = FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+DEG.ColonSI.dn <- proc_DEG(DEGs.ColonSI, p.cut = p.cut, FC.cut = -FC.cut, abs = FALSE, mat_cut = matt_pc.cut)$gene
+```
+
+```{r include=FALSE}
+stat_mat <- function(glist){
+  stat.ret <- matrix(NA, length(glist), length(glist))
+  for(i in 1:length(glist)){
+    for(j in 1:length(glist)){
+      stat.ret[i,j] <- length(intersect(glist[[i]],glist[[j]]))
+    }
+  }
+  return(stat.ret)
+}
+
+```
+
+
+```{r include=FALSE}
+stat_ret <- stat_mat(list(DEG.BM.up,
+                          DEG.Blood.up,
+                          DEG.SP.up,
+                          DEG.Lung.up,
+                          DEG.Skin.up,
+                          DEG.Colon.up,
+                          DEG.SI.up,
+                          DEG.SPBlood.up,
+                          DEG.ColonSkin.up,
+                          DEG.ColonSI.up))
+rownames(stat_ret) <- colnames(stat_ret) <- c("BM.up",
+                                              "Blood.up",
+                                              "SP.up",
+                                              "Lung.up",
+                                              "Skin.up",
+                                              "Colon.up",
+                                              "SI.up",
+                                              "SPBlood.up",
+                                              "ColonSkin.up",
+                                              "ColonSI.up")
+```
+
+```{r include=FALSE}
+DEG.up_m <- unique(c(DEG.BM.up,
+             DEG.Blood.up,
+             DEG.SP.up,
+             DEG.Lung.up,
+             DEG.Skin.up,
+             DEG.Colon.up,
+             DEG.SI.up,
+             DEG.SPBlood.up,
+             DEG.ColonSkin.up,
+             DEG.ColonSI.up))
+```
+
+```{r echo=FALSE}
+stat_ret.p0.05_FC1.5 <- stat_ret
+stat_ret.p0.05_FC1.5
+cat("\ntotal merged DEGs.up:\n(padj<0.05, FC>1.5)\n",
+    length(DEG.up_m))
+```
+
+##### comparison of DEGs                
+
+```{r echo=FALSE, fig.height=5.2, fig.width=6.8}
+comp0 <- reshape2::melt(stat_ret.p0.05_FC1.5)
+colnames(comp0) <- c("DEGs0","DEGs","Overlap")
+lvl <- c("BM.up",
+         "Blood.up",
+         "SP.up",
+         "Lung.up",
+         "Skin.up",
+         "Colon.up",
+         "SI.up",
+         "SPBlood.up",
+         "ColonSkin.up",
+         "ColonSI.up")
+
+comp0$DEGs0 <- factor(as.character(comp0$DEGs0),
+                      levels = lvl)
+comp0$DEGs <- factor(as.character(comp0$DEGs),
+                      levels = lvl)
+p.comp0 <- ggplot(comp0, 
+       aes(DEGs0,DEGs,size=Overlap,color=DEGs)) + 
+  geom_point()+
+  theme (axis.text.x = element_text (angle = 90, hjust = 1, vjust=.25)) +
+  labs(x="",y="", title = "DEGs.up comparison\n(4,426 merged DEGs as candidates)")
+p.comp0
+```
+
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./TissueSpecific/z01.comparison.merged_upDEGs.pdf",
+       plot = p.comp0,
+       width = 6.8,
+       height = 5.2)
+```
+
+
+### entropy        
+
+#### count entropy and sort        
+
+
+define as        
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1088961/             
+
+
+```{r include=FALSE}
+shannon.entropy <- function(p){
+  if (min(p) < 0 || sum(p) <= 0 || is.na(p[1])) return(NA)
+  else {p.norm <- p[p>0]/sum(p)
+  return(-sum(log2(p.norm)*p.norm))
+  } 
+}
+```
+
+```{r include=FALSE}
+color.test <- colorRampPalette(
+    c(
+      "#03047F", # deep blue
+      "white",
+      "#CC2627"  # deep red
+    )
+  )(100)
+```
+
+```{r include=FALSE}
+matt_pc.up_m <- matt_pc.cut[DEG.up_m,]
+matt_pc.avg <- cbind.data.frame(BM=rowMeans(matt_pc.up_m[,idx.BM]),
+                                Blood=rowMeans(matt_pc.up_m[,idx.Blood]),
+                                SP=rowMeans(matt_pc.up_m[,idx.SP]),
+                                Lung=rowMeans(matt_pc.up_m[,idx.Lung]),
+                                Skin=rowMeans(matt_pc.up_m[,idx.Skin]),
+                                Colon=rowMeans(matt_pc.up_m[,idx.Colon]),
+                                SI=rowMeans(matt_pc.up_m[,idx.SI]))
+matt_pc.avg <- round(matt_pc.avg,2)
+
+# entropy
+ShE <- rep(NA,nrow(matt_pc.avg))
+for(i in 1:nrow(matt_pc.avg)){
+  ShE[i] <- shannon.entropy(as.vector(as.matrix(matt_pc.avg[i,])))
+}
+ShE <- round(ShE,4)
+
+# add entropy
+matt_pc.up_m <- cbind(matt_pc.up_m, ShE)
+matt_pc.avg <- cbind(matt_pc.avg, ShE)
+
+# sort
+matt_pc.up_m <- as.data.frame(matt_pc.up_m) %>% arrange(ShE)
+matt_pc.avg <- matt_pc.avg %>% arrange(ShE)
+```
+
+```{r eval=FALSE, include=FALSE}
+#write.csv(matt_pc.avg,"./TissueSpecific/tissue-mean.tpm_4426.entropy_sorted.csv")
+```
+
+
+```{r paged.print=FALSE}
+dim(matt_pc.up_m)
+head(matt_pc.up_m)
+```
+
+```{r paged.print=FALSE}
+dim(matt_pc.avg)
+head(matt_pc.avg)
+```
+
+```{r eval=FALSE, include=FALSE}
+matt_pc.cut[c("Mcpt8","Bex6","Klra17","Ctsg","Mpo","Elane"),]
+```
+
+```{r}
+plot(matt_pc.up_m$ShE)
+```
+
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "none",
+         main = "log2(TPM+1) of candidates \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "row",
+         breaks= seq(-2.5,2.5,0.05), 
+         color= color.test,
+         main = "zscore of candidates \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[1:3000,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "none",
+         main = "log2(TPM+1) of candidates, Entropy top3,000 \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[1:3000,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "row",
+         breaks= seq(-2.5,2.5,0.05), color= color.test,
+         main = "zscore of candidates, Entropy top3,000 \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[1:2000,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "none",
+         main = "log2(TPM+1) of candidates, Entropy top2,000 \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[1:2000,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "row",
+         breaks= seq(-2.5,2.5,0.05), color= color.test,
+         main = "zscore of candidates, Entropy top2,000 \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[1:1000,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "none",
+         main = "log2(TPM+1) of candidates, Entropy top1,000 \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(log2(as.matrix(matt_pc.up_m[1:1000,-ncol(matt_pc.up_m)])+1), 
+         cluster_rows = T, 
+         cluster_cols = T, 
+         show_rownames = F,
+         scale = "row",
+         breaks= seq(-2.5,2.5,0.05), color= color.test,
+         main = "zscore of candidates, Entropy top1,000 \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+##### distribution of shannon entropy for 3160 candidate tissue specific DEGs            
+```{r echo=FALSE, fig.height=4, fig.width=6}
+plot(sort(ShE), 
+     cex=0.75,
+     main="distribution of Shannon Entropy \n(for 4,426 candidate tissue specific DEGs)",cex.main=1)
+abline(h=0.5,lty=2)
+abline(h=1,lty=2)
+abline(h=1.5,lty=2)
+abline(h=2,lty=2)
+abline(h=2.5,lty=2)
+abline(h=3,lty=2)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z03.entropy_distribution.4426.pdf",
+    width = 5.6,
+    height = 4.2)
+plot(sort(ShE), 
+     cex=0.75,
+     main="distribution of Shannon Entropy \n(for 4426 candidate tissue specific DEGs)",cex.main=1)
+abline(h=0.5,lty=2)
+abline(h=1,lty=2)
+abline(h=1.5,lty=2)
+abline(h=2,lty=2)
+abline(h=2.5,lty=2)
+dev.off()
+```
+
+##### number of genes with ShE < 0.5, 1, 1.5, 2 and 2.5                          
+```{r echo=FALSE}
+cat("ShE < 0.5: ",sum(ShE < 0.5),
+"\nShE < 1:   ",sum(ShE < 1),
+"\nShE < 1.5: ",sum(ShE < 1.5),
+"\nShE < 2:   ",sum(ShE < 2),
+"\nShE < 2.2725:",sum(ShE < 2.2725),
+"\nShE < 2.5: ",sum(ShE < 2.5),
+"\nShE < 2.546: ",sum(ShE < 2.546),
+"\nShE < 2.6551:",sum(ShE < 2.6551),
+"\nShE < 2.75: ",sum(ShE < 2.8))
+```
+
+#### ShE around 2.5           
+```{r paged.print=FALSE}
+test0.spc <- matt_pc.avg %>% filter(ShE < 2.51 & ShE > 2.5)
+test0.spc[1:20,]
+```
+
+```{r include=FALSE}
+# plot 12 genes with entropy
+barplot_e <- function(test.spc,n=12){
+  for(i in 1:n){
+  mat0 <- as.matrix(head(test.spc,n)[i,1:(ncol(head(test.spc,n))-1)])
+  df0 <- head(test.spc,n)[i,1:(ncol(head(test.spc,n)))]
+  barplot(mat0, cex.names = 0.88,
+          main = paste0(rownames(mat0),
+                        ", ShE: ",
+                        df0$ShE))
+  }
+}
+```
+           
+```{r echo=FALSE, fig.height=7.2, fig.width=12.6}
+par(mfrow=c(3,4))
+barplot_e(test0.spc)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z04.check_entropy0_2.5.pdf",
+    width = 12.6,
+    height = 7.2)
+par(mfrow=c(3,4))
+barplot_e(test0.spc)
+dev.off()
+```
+
+
+#### ShE around 2           
+```{r paged.print=FALSE}
+test1.spc <- matt_pc.avg %>% filter(ShE < 2.1 & ShE > 2)
+test1.spc[1:20,]
+```
+
+
+```{r echo=FALSE, fig.height=7.2, fig.width=12.6}
+par(mfrow=c(3,4))
+barplot_e(test1.spc)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z04.check_entropy1_2.0.pdf",
+    width = 12.6,
+    height = 7.2)
+par(mfrow=c(3,4))
+barplot_e(test1.spc)
+dev.off()
+```
+
+
+#### ShE around 1.5           
+```{r paged.print=FALSE}
+test2.spc <- matt_pc.avg %>% filter(ShE < 1.6 & ShE > 1.502)
+test2.spc[1:20,]
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=12.6}
+par(mfrow=c(3,4))
+barplot_e(test2.spc)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z04.check_entropy2_1.5.pdf",
+    width = 12.6,
+    height = 7.2)
+par(mfrow=c(3,4))
+barplot_e(test2.spc)
+dev.off()
+```
+
+#### ShE around 1           
+```{r paged.print=FALSE}
+test3.spc <- matt_pc.avg %>% filter(ShE < 1.1 & ShE > 0.95)
+test3.spc[1:20,]
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=12.6}
+par(mfrow=c(3,4))
+barplot_e(test3.spc)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z04.check_entropy3_1.0.pdf",
+    width = 12.6,
+    height = 7.2)
+par(mfrow=c(3,4))
+barplot_e(test3.spc)
+dev.off()
+```
+
+#### ShE around 0.5           
+```{r paged.print=FALSE}
+test4.spc <- matt_pc.avg %>% filter(ShE < 0.5 & ShE > 0.38)
+test4.spc
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=12.6}
+par(mfrow=c(3,4))
+barplot_e(test4.spc)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z04.check_entropy4_0.5.pdf",
+    width = 12.6,
+    height = 7.2)
+par(mfrow=c(3,4))
+barplot_e(test4.spc)
+dev.off()
+```
+
+
+### tissue specifc            
+             
+define unique list:               
+tissue average tpm = max average tpm        
+(one gene only appears once in one tissue)            
+
+each list each tissue sort by tpm/zscore, cut ShE top3k/2k/1k         
+
+```{r echo=FALSE}
+## define function to process matrix
+# for unique list
+heat_mat <- function(m,
+                     idx=c(idx.BM,idx.Blood,idx.SP,idx.Lung,idx.Skin,idx.Colon,idx.SI), 
+                     return_avg=FALSE, 
+                     zscore=FALSE,
+                     return_gene=FALSE,
+                     unique=TRUE){
+  m.avg <- data.frame(row.names = rownames(m),
+                      BM = rowMeans(m[idx.BM]),
+                      Blood = rowMeans(m[idx.Blood]),
+                      SP = rowMeans(m[idx.SP]),
+                      Lung = rowMeans(m[idx.Lung]),
+                      Skin = rowMeans(m[idx.Skin]),
+                      Colon = rowMeans(m[idx.Colon]),
+                      SI = rowMeans(m[idx.SI]))
+  m <- log2(as.matrix(m[,idx])+1)
+  m.avg <- log2(as.matrix(m.avg)+1)
+  
+  if(unique==TRUE){
+    g.BM <- rownames(m)[m.avg[,"BM"]==rowMaxs(m.avg)]
+    g.Blood <- rownames(m)[m.avg[,"Blood"]==rowMaxs(m.avg)]
+    g.SP <- rownames(m)[m.avg[,"SP"]==rowMaxs(m.avg)]
+    g.Lung <- rownames(m)[m.avg[,"Lung"]==rowMaxs(m.avg)]
+    g.Skin <- rownames(m)[m.avg[,"Skin"]==rowMaxs(m.avg)]
+    g.Colon <- rownames(m)[m.avg[,"Colon"]==rowMaxs(m.avg)]
+    g.SI <- rownames(m)[m.avg[,"SI"]==rowMaxs(m.avg)]
+  }else{
+    g.BM <- rownames(m)[m.avg[,"BM"]>=rowMeans(m.avg) & 
+                          m.avg[,"BM"]>=1/2*rowMaxs(m.avg)]
+    g.Blood <- rownames(m)[m.avg[,"Blood"]>=rowMeans(m.avg) & 
+                             m.avg[,"Blood"]>=1/2*rowMaxs(m.avg)]
+    g.SP <- rownames(m)[m.avg[,"SP"]>=rowMeans(m.avg) & 
+                          m.avg[,"SP"]>=1/2*rowMaxs(m.avg)]
+    g.Lung <- rownames(m)[m.avg[,"Lung"]>=rowMeans(m.avg) & 
+                            m.avg[,"Lung"]>=1/2*rowMaxs(m.avg)]
+    g.Skin <- rownames(m)[m.avg[,"Skin"]>=rowMeans(m.avg) & 
+                            m.avg[,"Skin"]>=1/2*rowMaxs(m.avg)]
+    g.Colon <- rownames(m)[m.avg[,"Colon"]>=rowMeans(m.avg) & 
+                             m.avg[,"Colon"]>=1/2*rowMaxs(m.avg)]
+    g.SI <- rownames(m)[m.avg[,"SI"]>=rowMeans(m.avg) & 
+                          m.avg[,"SI"]>=1/2*rowMaxs(m.avg)]
+  }
+  
+  
+  if(zscore==TRUE){
+    m.avg <- zscore_mat(m.avg)
+    m <- zscore_mat(m)
+  }
+  
+  g.BM <- g.BM[order(m.avg[g.BM,"BM"],decreasing = T)]
+  g.Blood <- g.Blood[order(m.avg[g.Blood,"Blood"],decreasing = T)]
+  g.SP <- g.SP[order(m.avg[g.SP,"SP"],decreasing = T)]
+  g.Lung <- g.Lung[order(m.avg[g.Lung,"Lung"],decreasing = T)]
+  g.Skin <- g.Skin[order(m.avg[g.Skin,"Skin"],decreasing = T)]
+  g.Colon <- g.Colon[order(m.avg[g.Colon,"Colon"],decreasing = T)]
+  g.SI <- g.SI[order(m.avg[g.SI,"SI"],decreasing = T)]
+  
+  if(return_gene==TRUE){
+    return(list(g.BM=g.BM,
+                g.Blood=g.Blood,
+                g.SP=g.SP,
+                g.Lung=g.Lung,
+                g.Skin=g.Skin,
+                g.Colon=g.Colon,
+                g.SI=g.SI))
+    
+  }else{
+  if(return_avg==TRUE){
+    return(m.avg[c(g.BM,g.Blood,g.SP,g.Lung,g.Skin,g.Colon,g.SI),])
+  }else{
+    return(m[c(g.BM,g.Blood,g.SP,g.Lung,g.Skin,g.Colon,g.SI),])
+  }    
+  }
+  
+}
+```
+
+
+##### unique list           
+
+```{r include=FALSE}
+genes_uniq <- heat_mat(matt_pc.up_m[,-25],
+                       zscore = FALSE,return_gene = TRUE)
+genes_uniq.cut0_top3k <- heat_mat(matt_pc.up_m[1:3000,-25],
+                               zscore = FALSE,return_gene = TRUE)
+genes_uniq.cut1_top2k <- heat_mat(matt_pc.up_m[1:2000,-25],
+                               zscore = FALSE,return_gene = TRUE)
+genes_uniq.cut2_top1k <- heat_mat(matt_pc.up_m[1:1000,-25],
+                               zscore = FALSE,return_gene = TRUE)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+
+# list
+for(TISS in names(genes_uniq.cut0_top3k)){
+  write.table(genes_uniq.cut0_top3k[[TISS]], paste0("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.",TISS,".txt"),
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+}
+for(TISS in names(genes_uniq.cut1_top2k)){
+  write.table(genes_uniq.cut1_top2k[[TISS]], paste0("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.",TISS,".txt"),
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+}
+for(TISS in names(genes_uniq.cut2_top1k)){
+  write.table(genes_uniq.cut2_top1k[[TISS]], paste0("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.",TISS,".txt"),
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+}
+
+
+# for kegg
+for(TISS in names(genes_uniq.cut0_top3k)){
+  write.table(cbind(genes_uniq.cut0_top3k[[TISS]],0,0,2), 
+              paste0("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/kegg/DEG_",TISS,".unique_top3k"),
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+}
+for(TISS in names(genes_uniq.cut1_top2k)){
+  write.table(cbind(genes_uniq.cut1_top2k[[TISS]],0,0,2), 
+              paste0("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/kegg/DEG_",TISS,".unique_top2k"),
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+}
+for(TISS in names(genes_uniq.cut2_top1k)){
+  write.table(cbind(genes_uniq.cut2_top1k[[TISS]],0,0,2), 
+              paste0("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/kegg/DEG_",TISS,".unique_top1k"),
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+}
+
+```
+
+
+#### 4,426 DEGs, all         
+
+```{r echo=FALSE}
+unlist(lapply(genes_uniq,length))
+```
+```{r echo=FALSE}
+genes_uniq.stat <- stat_mat(genes_uniq)
+rownames(genes_uniq.stat) <- colnames(genes_uniq.stat) <- c("BM",
+                                              "Blood",
+                                              "SP",
+                                              "Lung",
+                                              "Skin",
+                                              "Colon",
+                                              "SI")
+genes_uniq.stat
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=5.4}
+comp_uniq <- reshape2::melt(genes_uniq.stat)
+colnames(comp_uniq) <- c("DEGs0","DEGs","Overlap")
+lvl <- c("BM",
+         "Blood",
+         "SP",
+         "Lung",
+         "Skin",
+         "Colon",
+         "SI")
+
+comp_uniq$DEGs0 <- factor(as.character(comp_uniq$DEGs0),
+                      levels = lvl)
+comp_uniq$DEGs <- factor(as.character(comp_uniq$DEGs),
+                      levels = lvl)
+p.z070 <- ggplot(comp_uniq, 
+       aes(DEGs0,DEGs,size=Overlap,color=DEGs)) + 
+  geom_point()+
+  theme (axis.text.x = element_text (angle = 90, hjust = 1, vjust=.25)) +
+  labs(x="",y="", title = "Overlap of unique list\n4,426 DEGs") +
+  scale_colour_manual(values=color.tissue)
+p.z070
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_4426.log2tpm.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_4426.zscore.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+```
+
+
+#### 4,426 DEGs, cut0: top3k                     
+
+```{r echo=FALSE}
+unlist(lapply(genes_uniq.cut0_top3k,length))
+```
+
+
+```{r echo=FALSE}
+genes_uniq.stat.cut0 <- stat_mat(genes_uniq.cut0_top3k)
+rownames(genes_uniq.stat.cut0) <- colnames(genes_uniq.stat.cut0) <- c("BM",
+                                              "Blood",
+                                              "SP",
+                                              "Lung",
+                                              "Skin",
+                                              "Colon",
+                                              "SI")
+genes_uniq.stat.cut0
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=5.4}
+comp_uniq.cut0 <- reshape2::melt(genes_uniq.stat.cut0)
+colnames(comp_uniq.cut0) <- c("DEGs0","DEGs","Overlap")
+lvl <- c("BM",
+         "Blood",
+         "SP",
+         "Lung",
+         "Skin",
+         "Colon",
+         "SI")
+
+comp_uniq.cut0$DEGs0 <- factor(as.character(comp_uniq.cut0$DEGs0),
+                      levels = lvl)
+comp_uniq.cut0$DEGs <- factor(as.character(comp_uniq.cut0$DEGs),
+                      levels = lvl)
+p.z071 <- ggplot(comp_uniq.cut0, 
+       aes(DEGs0,DEGs,size=Overlap,color=DEGs)) + 
+  geom_point()+
+  theme (axis.text.x = element_text (angle = 90, hjust = 1, vjust=.25)) +
+  labs(x="",y="", title = "Overlap of unique list\n4,426DEGs, Entropy top3k") +
+  scale_colour_manual(values=color.tissue)
+p.z071
+```
+
+```{r echo=FALSE, fig.height=7.5, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[1:3000,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific, Entropy top3k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.5, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[1:3000,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific, Entropy top3k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_cut0top3k.log2tpm.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[1:3000,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific, Entropy top3k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_cut0top3k.zscore.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[1:3000,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific, Entropy top3k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+```
+
+
+#### 4,426 DEGs, cut1: top2k                     
+
+```{r echo=FALSE}
+unlist(lapply(genes_uniq.cut1_top2k,length))
+```
+
+
+```{r echo=FALSE}
+genes_uniq.stat.cut1 <- stat_mat(genes_uniq.cut1_top2k)
+rownames(genes_uniq.stat.cut1) <- colnames(genes_uniq.stat.cut1) <- c("BM",
+                                              "Blood",
+                                              "SP",
+                                              "Lung",
+                                              "Skin",
+                                              "Colon",
+                                              "SI")
+genes_uniq.stat.cut1
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=5.4}
+comp_uniq.cut1 <- reshape2::melt(genes_uniq.stat.cut1)
+colnames(comp_uniq.cut1) <- c("DEGs0","DEGs","Overlap")
+lvl <- c("BM",
+         "Blood",
+         "SP",
+         "Lung",
+         "Skin",
+         "Colon",
+         "SI")
+
+comp_uniq.cut1$DEGs0 <- factor(as.character(comp_uniq.cut1$DEGs0),
+                      levels = lvl)
+comp_uniq.cut1$DEGs <- factor(as.character(comp_uniq.cut1$DEGs),
+                      levels = lvl)
+p.z072 <- ggplot(comp_uniq.cut1, 
+       aes(DEGs0,DEGs,size=Overlap,color=DEGs)) + 
+  geom_point()+
+  theme (axis.text.x = element_text (angle = 90, hjust = 1, vjust=.25)) +
+  labs(x="",y="", title = "Overlap of unique list\n4,426DEGs, Entropy top2k") +
+  scale_colour_manual(values=color.tissue)
+p.z072
+```
+
+```{r echo=FALSE, fig.height=7.5, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[1:2000,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific, Entropy top2k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.5, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[1:2000,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific, Entropy top2k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_cut1top2k.log2tpm.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[1:2000,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific, Entropy top2k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_cut1top2k.zscore.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[1:2000,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific, Entropy top2k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+```
+
+
+#### 4,426 DEGs, cut2: top1k                     
+
+```{r echo=FALSE}
+unlist(lapply(genes_uniq.cut2_top1k,length))
+```
+
+
+```{r echo=FALSE}
+genes_uniq.stat.cut2 <- stat_mat(genes_uniq.cut2_top1k)
+rownames(genes_uniq.stat.cut2) <- colnames(genes_uniq.stat.cut2) <- c("BM",
+                                              "Blood",
+                                              "SP",
+                                              "Lung",
+                                              "Skin",
+                                              "Colon",
+                                              "SI")
+genes_uniq.stat.cut2
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=5.4}
+comp_uniq.cut2 <- reshape2::melt(genes_uniq.stat.cut2)
+colnames(comp_uniq.cut2) <- c("DEGs0","DEGs","Overlap")
+lvl <- c("BM",
+         "Blood",
+         "SP",
+         "Lung",
+         "Skin",
+         "Colon",
+         "SI")
+
+comp_uniq.cut2$DEGs0 <- factor(as.character(comp_uniq.cut2$DEGs0),
+                      levels = lvl)
+comp_uniq.cut2$DEGs <- factor(as.character(comp_uniq.cut2$DEGs),
+                      levels = lvl)
+p.z073 <- ggplot(comp_uniq.cut2, 
+       aes(DEGs0,DEGs,size=Overlap,color=DEGs)) + 
+  geom_point()+
+  theme (axis.text.x = element_text (angle = 90, hjust = 1, vjust=.25)) +
+  labs(x="",y="", title = "Overlap of unique list\n4,426DEGs, Entropy top1k") +
+  scale_colour_manual(values=color.tissue)
+p.z073
+```
+
+```{r echo=FALSE, fig.height=7.5, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[1:1000,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific, Entropy top1k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r echo=FALSE, fig.height=7.5, fig.width=5.4}
+pheatmap::pheatmap(heat_mat(matt_pc.up_m[1:1000,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific, Entropy top1k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_cut2top1k.log2tpm.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[1:1000,-25],zscore = FALSE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         #color = color.test,
+         #breaks = seq(-2,2,0.04),
+         main = "log2(TPM+1) of tissue specific, Entropy top1k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+
+pdf("./TissueSpecific/z08.heatmap_sort.uniquelist_cut2top1k.zscore.pdf",
+    width = 5.4,
+    height = 7.5)
+pheatmap(heat_mat(matt_pc.up_m[1:1000,-25],zscore = TRUE), 
+         cluster_rows = F, 
+         cluster_cols = F, 
+         show_rownames = F,
+         scale = "none",
+         color = color.test,
+         breaks = seq(-2,2,0.04),
+         main = "zscore of tissue specific, Entropy top1k \n4,426 DEGs(P<0.05, FC>1.5), TPM>4 in at least one tissue")
+dev.off()
+```
+
+
+## mod                          
+
+
+to get top1k tpm matrix               
+
+
+```{r paged.print=FALSE}
+matt <- read.csv("../tissues_DEGs/RNAseq.SS2_LY_20210608_mod20220117.filt_tpm.tissues.pc_gene.csv")
+rownames(matt) <- matt$gene
+head(matt)
+```
+
+```{r paged.print=FALSE}
+mat.e <- read.csv("./TissueSpecific/tissue-mean.tpm_4426.entropy_sorted.csv")
+rownames(mat.e) <- mat.e$X
+head(mat.e)
+```
+
+
+
+```{r}
+readlist <- function(x){
+  as.vector(unlist(read.table(x)))
+}
+```
+
+
+#####now the gene list is avg-zscore reordered           
+```{r}
+top3k.list <- list(BM=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.BM.txt"),
+                   Blood=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.Blood.txt"),
+                   SP=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.SP.txt"),
+                   Lung=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.Lung.txt"),
+                   Skin=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.Skin.txt"),
+                   Colon=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.Colon.txt"),
+                   SI=readlist("./TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.SI.txt"))
+top2k.list <- list(BM=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.BM.txt"),
+                   Blood=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.Blood.txt"),
+                   SP=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.SP.txt"),
+                   Lung=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.Lung.txt"),
+                   Skin=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.Skin.txt"),
+                   Colon=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.Colon.txt"),
+                   SI=readlist("./TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.SI.txt"))
+top1k.list <- list(BM=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.BM.txt"),
+                   Blood=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.Blood.txt"),
+                   SP=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.SP.txt"),
+                   Lung=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.Lung.txt"),
+                   Skin=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.Skin.txt"),
+                   Colon=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.Colon.txt"),
+                   SI=readlist("./TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.SI.txt"))
+```
+
+
+
+```{r}
+lapply(top3k.list,length)
+```
+
+
+
+```{r}
+lapply(top2k.list,length)
+```
+
+```{r}
+lapply(top1k.list,length)
+```
+
+
+```{r}
+matt.1k <- matt[as.vector(unlist(top1k.list)),]
+matt.2k <- matt[as.vector(unlist(top2k.list)),]
+matt.3k <- matt[as.vector(unlist(top3k.list)),]
+```
+
+
+```{r}
+matt.1k$entropy <- mat.e[rownames(matt.1k),"ShE"]
+matt.2k$entropy <- mat.e[rownames(matt.2k),"ShE"]
+matt.3k$entropy <- mat.e[rownames(matt.3k),"ShE"]
+```
+
+
+```{r eval=FALSE, include=FALSE}
+write.csv(matt.1k, "./TissueSpecific/mod20220816/matrix_tpm.top1k.csv", row.names = F, col.names = T)
+write.csv(matt.2k, "./TissueSpecific/mod20220816/matrix_tpm.top2k.csv", row.names = F, col.names = T)
+write.csv(matt.3k, "./TissueSpecific/mod20220816/matrix_tpm.top3k.csv", row.names = F, col.names = T)
+```
+
+
+
+## multi_plot            
+
+mod20220530                
+
+sort several profiles to reveal the specificity               
+        
+plot entropy, meanTPM, and DEG info of 'tissue vs non-tissue' in one                 
+       
+
+### new DEG table             
+
+```{r}
+# unique top2k
+DEGs.BM_u2k <- data.frame(DEGs.BM[top2k.list$BM,],
+                          entropy=matt_pc.avg[top2k.list$BM,"ShE"],
+                          BM.tpm=matt_pc.avg[top2k.list$BM,"BM"]) %>% arrange(entropy)
+DEGs.Lung_u2k <- data.frame(DEGs.Lung[top2k.list$Lung,],
+                          entropy=matt_pc.avg[top2k.list$Lung,"ShE"],
+                          Lung.tpm=matt_pc.avg[top2k.list$Lung,"Lung"]) %>% arrange(entropy)
+DEGs.Skin_u2k <- data.frame(DEGs.Skin[top2k.list$Skin,],
+                          entropy=matt_pc.avg[top2k.list$Skin,"ShE"],
+                          Skin.tpm=matt_pc.avg[top2k.list$Skin,"Skin"]) %>% arrange(entropy)
+DEGs.Colon_u2k <- data.frame(DEGs.Colon[top2k.list$Colon,],
+                          entropy=matt_pc.avg[top2k.list$Colon,"ShE"],
+                          Colon.tpm=matt_pc.avg[top2k.list$Colon,"Colon"]) %>% arrange(entropy)
+DEGs.SI_u2k <- data.frame(DEGs.SI[top2k.list$SI,],
+                          entropy=matt_pc.avg[top2k.list$SI,"ShE"],
+                          SI.tpm=matt_pc.avg[top2k.list$SI,"SI"]) %>% arrange(entropy)
+
+
+# unique top1k
+DEGs.BM_u1k <- data.frame(DEGs.BM[top1k.list$BM,],
+                          entropy=matt_pc.avg[top1k.list$BM,"ShE"],
+                          BM.tpm=matt_pc.avg[top1k.list$BM,"BM"]) %>% arrange(entropy)
+DEGs.Lung_u1k <- data.frame(DEGs.Lung[top1k.list$Lung,],
+                          entropy=matt_pc.avg[top1k.list$Lung,"ShE"],
+                          Lung.tpm=matt_pc.avg[top1k.list$Lung,"Lung"]) %>% arrange(entropy)
+DEGs.Skin_u1k <- data.frame(DEGs.Skin[top1k.list$Skin,],
+                          entropy=matt_pc.avg[top1k.list$Skin,"ShE"],
+                          Skin.tpm=matt_pc.avg[top1k.list$Skin,"Skin"]) %>% arrange(entropy)
+DEGs.Colon_u1k <- data.frame(DEGs.Colon[top1k.list$Colon,],
+                          entropy=matt_pc.avg[top1k.list$Colon,"ShE"],
+                          Colon.tpm=matt_pc.avg[top1k.list$Colon,"Colon"]) %>% arrange(entropy)
+DEGs.SI_u1k <- data.frame(DEGs.SI[top1k.list$SI,],
+                          entropy=matt_pc.avg[top1k.list$SI,"ShE"],
+                          SI.tpm=matt_pc.avg[top1k.list$SI,"SI"]) %>% arrange(entropy)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+# save
+write.csv(DEGs.BM_u2k, "./TissueSpecific/multi_plot/Specificity_plot.BM_top2k.mod20220530.csv")
+write.csv(DEGs.Lung_u2k, "./TissueSpecific/multi_plot/Specificity_plot.Lung_top2k.mod20220530.csv")
+write.csv(DEGs.Skin_u2k, "./TissueSpecific/multi_plot/Specificity_plot.SKin_top2k.mod20220530.csv")
+write.csv(DEGs.Colon_u2k, "./TissueSpecific/multi_plot/Specificity_plot.Colon_top2k.mod20220530.csv")
+write.csv(DEGs.SI_u2k, "./TissueSpecific/multi_plot/Specificity_plot.SI_top2k.mod20220530.csv")
+
+write.csv(DEGs.BM_u1k, "./TissueSpecific/multi_plot/Specificity_plot.BM_top1k.mod20220530.csv")
+write.csv(DEGs.Lung_u1k, "./TissueSpecific/multi_plot/Specificity_plot.Lung_top1k.mod20220530.csv")
+write.csv(DEGs.Skin_u1k, "./TissueSpecific/multi_plot/Specificity_plot.SKin_top1k.mod20220530.csv")
+write.csv(DEGs.Colon_u1k, "./TissueSpecific/multi_plot/Specificity_plot.Colon_top1k.mod20220530.csv")
+write.csv(DEGs.SI_u1k, "./TissueSpecific/multi_plot/Specificity_plot.SI_top1k.mod20220530.csv")
+```
+
+
+### multi_plot            
+
+
+#### BM              
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## BM
+mat.plot_u2k.BM <- DEGs.BM_u2k
+# label Entropy top16
+mat.plot_u2k.BM$label <- ""
+mat.plot_u2k.BM$label[1:16] <- rownames(mat.plot_u2k.BM)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u2k.BM$padj[mat.plot_u2k.BM$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u2k.BM <- mat.plot_u2k.BM %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(BM.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (BM vs nonBM)", y="1 / (Entropy+1)",
+       title = paste0("Bone Marrow: ",dim(mat.plot_u2k.BM)[1]," markers in top2k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u2k.BM
+```
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## BM
+mat.plot_u1k.BM <- DEGs.BM_u1k
+# label Entropy top16
+mat.plot_u1k.BM$label <- ""
+mat.plot_u1k.BM$label[1:16] <- rownames(mat.plot_u1k.BM)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u1k.BM$padj[mat.plot_u1k.BM$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u1k.BM <- mat.plot_u1k.BM %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(BM.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (BM vs nonBM)", y="1 / (Entropy+1)",
+       title = paste0("Bone Marrow: ",dim(mat.plot_u1k.BM)[1]," markers in top1k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u1k.BM
+```
+
+
+#### Blood/Spleen         
+
+pass             
+
+
+#### Lung              
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## Lung
+mat.plot_u2k.Lung <- DEGs.Lung_u2k
+# label Entropy top16
+mat.plot_u2k.Lung$label <- ""
+mat.plot_u2k.Lung$label[1:16] <- rownames(mat.plot_u2k.Lung)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u2k.Lung$padj[mat.plot_u2k.Lung$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u2k.Lung <- mat.plot_u2k.Lung %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(Lung.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (Lung vs nonLung)", y="1 / (Entropy+1)",
+       title = paste0("Lung: ",dim(mat.plot_u2k.Lung)[1]," markers in top2k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u2k.Lung
+```
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## Lung
+mat.plot_u1k.Lung <- DEGs.Lung_u1k
+# label Entropy top16
+mat.plot_u1k.Lung$label <- ""
+mat.plot_u1k.Lung$label[1:16] <- rownames(mat.plot_u1k.Lung)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u1k.Lung$padj[mat.plot_u1k.Lung$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u1k.Lung <- mat.plot_u1k.Lung %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(Lung.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (Lung vs nonLung)", y="1 / (Entropy+1)",
+       title = paste0("Lung: ",dim(mat.plot_u1k.Lung)[1]," markers in top1k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u1k.Lung
+```
+
+#### Skin              
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## Skin
+mat.plot_u2k.Skin <- DEGs.Skin_u2k
+# label Entropy top16
+mat.plot_u2k.Skin$label <- ""
+mat.plot_u2k.Skin$label[1:16] <- rownames(mat.plot_u2k.Skin)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u2k.Skin$padj[mat.plot_u2k.Skin$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u2k.Skin <- mat.plot_u2k.Skin %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(Skin.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (Skin vs nonSkin)", y="1 / (Entropy+1)",
+       title = paste0("Skin: ",dim(mat.plot_u2k.Skin)[1]," markers in top2k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u2k.Skin
+```
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## Skin
+mat.plot_u1k.Skin <- DEGs.Skin_u1k
+# label Entropy top16
+mat.plot_u1k.Skin$label <- ""
+mat.plot_u1k.Skin$label[1:16] <- rownames(mat.plot_u1k.Skin)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u1k.Skin$padj[mat.plot_u1k.Skin$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u1k.Skin <- mat.plot_u1k.Skin %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(Skin.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (Skin vs nonSkin)", y="1 / (Entropy+1)",
+       title = paste0("Skin: ",dim(mat.plot_u1k.Skin)[1]," markers in top1k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u1k.Skin
+```
+
+#### Colon              
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## Colon
+mat.plot_u2k.Colon <- DEGs.Colon_u2k
+# label Entropy top16
+mat.plot_u2k.Colon$label <- ""
+mat.plot_u2k.Colon$label[1:16] <- rownames(mat.plot_u2k.Colon)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u2k.Colon$padj[mat.plot_u2k.Colon$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u2k.Colon <- mat.plot_u2k.Colon %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(Colon.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (Colon vs nonColon)", y="1 / (Entropy+1)",
+       title = paste0("Colon: ",dim(mat.plot_u2k.Colon)[1]," markers in top2k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u2k.Colon
+```
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## Colon
+mat.plot_u1k.Colon <- DEGs.Colon_u1k
+# label Entropy top16
+mat.plot_u1k.Colon$label <- ""
+mat.plot_u1k.Colon$label[1:16] <- rownames(mat.plot_u1k.Colon)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u1k.Colon$padj[mat.plot_u1k.Colon$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u1k.Colon <- mat.plot_u1k.Colon %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(Colon.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  geom_text_repel(size=2.3) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (Colon vs nonColon)", y="1 / (Entropy+1)",
+       title = paste0("Colon: ",dim(mat.plot_u1k.Colon)[1]," markers in top1k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u1k.Colon
+```
+
+
+#### SI           
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## SI
+mat.plot_u2k.SI <- DEGs.SI_u2k
+# label Entropy top16
+mat.plot_u2k.SI$label <- ""
+mat.plot_u2k.SI$label[1:16] <- rownames(mat.plot_u2k.SI)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u2k.SI$padj[mat.plot_u2k.SI$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u2k.SI <- mat.plot_u2k.SI %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(SI.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  #geom_text_repel(size=2.3) +
+  geom_text_repel(size=c(2.3,5,rep(2.3,530))) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (SI vs nonSI)", y="1 / (Entropy+1)",
+       title = paste0("Small Intestine: ",dim(mat.plot_u2k.SI)[1]," markers in top2k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u2k.SI
+```
+
+
+```{r echo=FALSE, fig.height=4.8, fig.width=6}
+## SI
+mat.plot_u1k.SI <- DEGs.SI_u1k
+# label Entropy top16
+mat.plot_u1k.SI$label <- ""
+mat.plot_u1k.SI$label[1:16] <- rownames(mat.plot_u1k.SI)[1:16]
+# cut padj 1e-20, or too large scale
+mat.plot_u1k.SI$padj[mat.plot_u1k.SI$padj < 1e-20] <- 1e-20
+
+## plot
+pp_u1k.SI <- mat.plot_u1k.SI %>%
+  ggplot(aes(y= 1/(entropy+1), x=log2FoldChange, size=log2(SI.tpm+1), fill= -log10(padj), label=label)) +
+  geom_point(shape=21) +
+  #geom_text_repel(size=2.3) +
+  geom_text_repel(size=c(2.3,5,rep(2.3,260))) +
+  theme_bw() + theme(panel.grid = element_blank()) +
+  labs(x="log2 FoldChange (SI vs nonSI)", y="1 / (Entropy+1)",
+       title = paste0("Small Intestine: ",dim(mat.plot_u1k.SI)[1]," markers in top1k specific genelist")) + 
+  guides(size=guide_legend(override.aes = list(shape=21), order = 1)) +
+  scale_fill_gradientn(colours = rev(rainbow(2)))
+pp_u1k.SI
+```
+
+
+```{r eval=FALSE, include=FALSE}
+## save pdf
+# top2k
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.BM_top2k.mod20220530.pdf",
+       plot = pp_u2k.BM,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.Lung_top2k.mod20220530.pdf",
+       plot = pp_u2k.Lung,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.Skin_top2k.mod20220530.pdf",
+       plot = pp_u2k.Skin,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.Colon_top2k.mod20220530.pdf",
+       plot = pp_u2k.Colon,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.SI_top2k.mod20220530.pdf",
+       plot = pp_u2k.SI,
+       width = 6.0, height = 4.8)
+
+# top1k
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.BM_top1k.mod20220530.pdf",
+       plot = pp_u1k.BM,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.Lung_top1k.mod20220530.pdf",
+       plot = pp_u1k.Lung,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.Skin_top1k.mod20220530.pdf",
+       plot = pp_u1k.Skin,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.Colon_top1k.mod20220530.pdf",
+       plot = pp_u1k.Colon,
+       width = 6.0, height = 4.8)
+ggsave("./TissueSpecific/multi_plot/Specificity_plot.SI_top1k.mod20220530.pdf",
+       plot = pp_u1k.SI,
+       width = 6.0, height = 4.8)
+
+```
+
+
+
+
+
+
+

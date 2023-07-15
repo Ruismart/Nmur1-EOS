@@ -1,0 +1,905 @@
+---
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+# RNAseq downstream analysis      
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#necessary packages and functions  
+source("I:/Shared_win/projects/RNA_normal/analysis.r")
+```
+
+
+## load expression mtx            
+
+already filtered in 'all_initial' part                 
+
+```{r echo=FALSE}
+dat = './RNAseq.SS2_LY_20210608.filt_cpm.SI_Nmur1.pc_gene.csv'
+mtxname = 'SS2_LY_20210608.SI_Nmur1'
+
+# specify names of 'A vs B', and cell idx of As and Bs
+Aname = "SI_P" 
+Bname = "SI_N"  
+
+#Aidx = c()
+#Bidx = c()
+
+mat_pc <- read.table(dat, header = TRUE, stringsAsFactors = F, sep = ",")
+rownames(mat_pc) <- mat_pc$gene
+mat_pc <- mat_pc[,2:ncol(mat_pc)]
+mat_pc <- as.matrix(mat_pc)
+
+Aidx = grep("SI_P",colnames(mat_pc))
+Bidx = grep("SI_N",colnames(mat_pc))
+
+```
+
+```{r echo=FALSE}
+datt = './RNAseq.SS2_LY_20210608.filt_tpm.SI_Nmur1.pc_gene.csv'
+
+matt_pc <- read.table(datt, header = TRUE, stringsAsFactors = F, sep = ",")
+rownames(matt_pc) <- matt_pc$gene
+matt_pc <- matt_pc[,2:ncol(matt_pc)]
+matt_pc <- as.matrix(matt_pc)
+
+```
+
+
+check filtered pc(protein coding) matrix        
+```{r}
+dim(mat_pc[,c(Aidx,Bidx)])
+head(mat_pc[,c(Aidx,Bidx)])
+``` 
+
+## QC  
+
+design info  
+```{r echo=FALSE, paged.print=FALSE}
+design <- data.frame(condition=factor(c(rep(Aname,length(Aidx)),rep(Bname,length(Bidx)))),
+                     replicate=factor(colnames(mat_pc[,c(Aidx,Bidx)])))
+rownames(design) <- colnames(mat_pc[,c(Aidx,Bidx)])
+design$condition <- factor(design$condition, levels = c("SI_P","SI_N"))
+design
+```
+
+### condition mean expression             
+
+```{r cross2, echo=FALSE, fig.height=6, fig.width=6, warning=FALSE}
+plot(data.frame(Aname=rowMeans(mat_pc[,Aidx]),
+                Bname=rowMeans(mat_pc[,Bidx])), pch=20, log = 'xy',
+     xlab = paste0("Mean normalized counts (",Aname,")"),xlim=c(0.1,100000),
+     ylab = paste0("Mean normalized counts (",Bname,")"),ylim=c(0.1,100000),
+     main = paste0(dim(mat_pc)[1]," filtered protein coding genes "))
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.SI_Nmur1/condition_mean.pdf",
+    height = 6, width = 6)
+plot(data.frame(Aname=rowMeans(mat_pc[,Aidx]),
+                Bname=rowMeans(mat_pc[,Bidx])), pch=20, log = 'xy',
+     xlab = paste0("Mean normalized counts (",Aname,")"),xlim=c(0.1,100000),
+     ylab = paste0("Mean normalized counts (",Bname,")"),ylim=c(0.1,100000),
+     main = paste0(dim(mat_pc)[1]," filtered protein coding genes "))
+dev.off()
+
+```
+
+### PCA          
+
+```{r include=FALSE}
+rv <- rowVars(mat_pc[,c(Aidx,Bidx)])
+selt <- order(rv, decreasing = TRUE)[seq_len(2000)]
+pca2 <- stats::prcomp(t(mat_pc[selt,c(Aidx,Bidx)]), scale.=TRUE, center= TRUE)
+#pca2$x
+
+pca_d <- as.data.frame(pca2$x)
+
+pca_d[,"condition"] = design$condition
+pca_d[,"batch"] = rownames(design)
+pca_d[,"replicate"] = design$replicate
+```
+
+```{r echo=FALSE}
+plot(pca2$sdev,pch=20, xlab="PC",ylab="Standard Variation", main="PCs of top2000 highly variable genes")
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.SI_Nmur1//PCs.pdf",
+    height = 4.5, width = 6)
+plot(pca2$sdev,pch=20, xlab="PC",ylab="Standard Variation", main="PCs of top2000 highly variable genes")
+dev.off()
+
+```
+
+##### PCA summary                 
+
+```{r echo=FALSE}
+# where to get that variance ??? 
+summary(pca2)
+```
+
+
+```{r echo=FALSE, fig.height=4.5, fig.width=6, message=FALSE, warning=FALSE}
+#plot the PCA
+#create a classic 2-dimension PCA plot (first two principal components) with conditions and library methods indicated
+cols <- c("#481567FF","#1F968BFF","#B5640B")
+
+cols <- c(cols[3], cols[2])
+names(cols) <- c(as.character(unique(design$condition)[1]),as.character(unique(design$condition)[2]))
+
+#p1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition, shape=condition))
+p1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition))
+p1 = p1 + geom_point(size=3.5)
+p1 = p1 + ggrepel::geom_text_repel(mapping = aes(label=pca_d$batch),size=2.5)
+p1 = p1 + stat_ellipse(type="norm", linetype=2)
+p1 = p1 + labs(title="PCA\nusing CPM(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p1 = p1 + scale_colour_manual(values = cols) 
+#p1 = p1 + scale_shape_manual(values=c(16,17,15))
+p1
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("figures.SI_Nmur1/PCA12.pdf",
+       plot = p1,
+       height = 4.8,
+       width = 6)
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=6, message=FALSE, warning=FALSE}
+#p1.1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition, shape=condition))
+p1.1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition))
+p1.1 = p1.1 + geom_point(size=3.5)
+#p1.1 = p1.1 + ggrepel::geom_text_repel(mapping = aes(label=pca_d$batch),size=2.5)
+p1.1 = p1.1 + stat_ellipse(type="norm", linetype=2)
+p1.1 = p1.1 + labs(title="PCA\nusing CPM(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p1.1 = p1.1 + scale_colour_manual(values = cols) 
+#p1.1 = p1.1 + scale_shape_manual(values=c(16,17,15))
+p1.1
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("figures.SI_Nmur1/PCA12_noID.pdf",
+       plot = p1.1,
+       height = 4.8,
+       width = 6)
+```
+
+##### mod20220523             
+
+```{r echo=FALSE, fig.height=3.6, fig.width=4.2, message=FALSE, warning=FALSE}
+#p1.2 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition, shape=condition))
+p1.2 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition))
+p1.2 = p1.2 + geom_point(size=3.5)
+#p1.2 = p1.2 + ggrepel::geom_text_repel(mapping = aes(label=pca_d$batch),size=2.5)
+p1.2 = p1.2 + stat_ellipse(type="norm", linetype=2)
+p1.2 = p1.2 + labs(title="PCA\n(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p1.2 = p1.2 + scale_colour_manual(values = cols)  + theme_classic()
+#p1.2 = p1.2 + scale_shape_manual(values=c(16,17,15))
+p1.2
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("figures.SI_Nmur1/SI_Nmur1.PCA12_noID.mod20220523.pdf",
+       plot = p1.2,
+       width = 4.2,
+       height = 3.6)
+```
+
+
+```{r eval=FALSE, fig.height=6, fig.width=6, message=FALSE, warning=FALSE, include=FALSE}
+##### with ellipse, ellipse.prob = 0.68     
+pca2.p <- ggbiplot::ggbiplot(pca2, obs.scale = 1, var.scale = 0,
+                   groups = design$condition, ellipse = TRUE,ellipse.prob = 0.68, var.axes = F) + 
+          labs(x="PC1: 27.8% variance", y="PC2: 20.5% variance", 
+               title = "PCA\nusing CPM(top2000 highly variable genes) ")
+pca2.p
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=6, message=FALSE, warning=FALSE}
+#plot the PCA
+p2 = ggplot(data=pca_d, aes(x=PC3, y=PC4, color=condition))
+p2 = p2 + geom_point(size=3.5)
+p2 = p2 + ggrepel::geom_text_repel(mapping = aes(label=pca_d$batch),size=2.5)
+p2 = p2 + stat_ellipse(type="norm", linetype=2)
+p2 = p2 + labs(title="PCA\nusing CPM(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p2 = p2 + scale_colour_manual(values = cols) 
+#p2 = p2 + scale_shape_manual(values=c(16,17,15))
+p2
+```
+
+
+### tSNE       
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=6,fig.height=4.5}
+set.seed(128)
+PCs <- 1:6
+PCss <- paste0(PCs[1],":",PCs[length(PCs)])
+pca2.emb <- pca2$x %*% diag(pca2$sdev**2)
+tsne_out <- Rtsne::Rtsne(
+  as.matrix(pca2.emb[,PCs]),
+  pca = FALSE,
+  perplexity = 3,
+  max_iter = 2000
+)
+
+#cols <- c("Meninges" = "#481567FF", "nonMeninges" = "#1F968BFF")
+p6 = ggplot(data=data.frame(tsne_out$Y), aes(x=X1, y=X2)) + labs(x="tSNE_1",y="tSNE_2", seed=FALSE) + 
+  #geom_point(aes(colour=design$condition, shape=design$condition),size=3.5) + 
+  geom_point(aes(colour=design$condition),size=3.5) + 
+  stat_ellipse(aes(colour=design$condition),type="norm", linetype=2) + 
+   ggrepel::geom_text_repel(mapping = aes(label=colnames(mat_pc[,c(Aidx,Bidx)])),size=2.5) + 
+  scale_colour_manual(values = cols) + 
+  #scale_shape_manual(values=c(16:10)) + 
+   labs(title=paste0("tSNE\nusing PC",PCss),
+               color="Condition", shape="batch")
+p6
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("figures.SI_Nmur1/tSNE.pdf",
+       plot = p6,
+       height = 4.8,
+       width = 6)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=6,fig.height=4.5}
+
+#cols <- c("Meninges" = "#481567FF", "nonMeninges" = "#1F968BFF")
+p6.1 = ggplot(data=data.frame(tsne_out$Y), aes(x=X1, y=X2)) + labs(x="tSNE_1",y="tSNE_2", seed=FALSE) + 
+  #geom_point(aes(colour=design$condition, shape=design$condition),size=3.5) + 
+  geom_point(aes(colour=design$condition),size=3.5) + 
+  stat_ellipse(aes(colour=design$condition),type="norm", linetype=2) + 
+   #ggrepel::geom_text_repel(mapping = aes(label=colnames(mat_pc[,c(Aidx,Bidx)])),size=2.5) + 
+  scale_colour_manual(values = cols) + 
+  #scale_shape_manual(values=c(16:10)) + 
+   labs(title=paste0("tSNE\nusing PC",PCss),
+               color="Condition", shape="batch")
+p6.1
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("figures.SI_Nmur1/tSNE_noID.pdf",
+       plot = p6.1,
+       height = 4.8,
+       width = 6)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=4.2,fig.height=3.6}
+
+#cols <- c("Meninges" = "#481567FF", "nonMeninges" = "#1F968BFF")
+p6.2 = ggplot(data=data.frame(tsne_out$Y), aes(x=X1, y=X2)) + labs(x="tSNE_1",y="tSNE_2", seed=FALSE) + 
+  #geom_point(aes(colour=design$condition, shape=design$condition),size=3.5) + 
+  geom_point(aes(colour=design$condition),size=3.2, alpha=0.8) + 
+  stat_ellipse(aes(colour=design$condition),type="norm", linetype=2) + 
+   #ggrepel::geom_text_repel(mapping = aes(label=colnames(mat_pc[,c(Aidx,Bidx)])),size=2.5) + 
+  scale_colour_manual(values = cols) + 
+  #scale_shape_manual(values=c(16:10)) + 
+   labs(title=paste0("tSNE\nusing PC",PCss),
+               color="Condition", shape="batch") + theme_classic()
+p6.2
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("figures.SI_Nmur1/SI_Nmur1.tSNE_noID.mod20220523.pdf",
+       plot = p6.2,
+       width = 4.5,
+       height = 3.6)
+```
+
+### correlation        
+
+```{r include=FALSE}
+#define a function to plot correlation  
+plotCor <- function(Mat){
+  library(edgeR)
+  library(corrplot)
+  Cor <- cor(log2(edgeR::cpm(Mat)+1))
+  par(cex=0.54, pin=c(8,8))
+  corrplot(Cor,method="number",title = "pearson correlation of log2(CPM+1)",mar = c(0, 0, 1, 0))
+}
+```
+
+
+##### correlation (log2(CPM+1)) of all filtered protein-coding genes        
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4.8, fig.height=4.8}
+plotCor(mat_pc)
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=4.8,fig.height=4.8}
+  Ret_mat <- log2(mat_pc[,c(Aidx,Bidx)]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.8
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot1 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+``` 
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.SI_Nmur1//correlation.all_filtered_protein_coding.pdf",
+    height = 4.8, width = 4.8)
+heatplot1
+dev.off()
+```
+
+##### correlation (log2(CPM+1)) of top2000 highly variable genes           
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=4.8,fig.height=4.8}
+  Ret_mat <- log2(mat_pc[selt,c(Aidx,Bidx)]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.8
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot2 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+``` 
+
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.SI_Nmur1/correlation.top2000_hvg.pdf",
+    height = 4.8, width = 4.8)
+heatplot2
+dev.off()
+```
+
+
+## Differential Analysis                
+
+##### 0606, padj < 0.01, FC > 1.5  
+
+```{r include=FALSE}
+ret <- run_MEedgeR(MAT = mat_pc[,c(Aidx,Bidx)], ED = Aname, WT = Bname, n1 = length(Aidx),n2 = length(Bidx),
+                         lcm = 10, padj = 0.01,lfc = log2(1.5), gsea = TRUE)
+```
+
+```{r}
+ret$SUM
+```
+
+```{r paged.print=FALSE}
+ret$gsea
+```
+
+
+
+##### 0606mod, using cutoff: p.adjust <0.01, FC >1.5         
+                      
+```{r message=FALSE, warning=FALSE, include=FALSE}
+rets <- finalplot(mat_pc[,c(Aidx,Bidx)],data.frame(ret$DEG_edgeR), paste0(Aname,"_vs_",Bname), 0.01, 1.5, 
+                  Sign = FALSE, Sign_dn = 40, Sign_up = 40, padjust = TRUE)
+```
+
+```{r echo=FALSE}
+cat("SI_P vs SI_N \nDEGs: ",length(c(rets$up,rets$down)),
+    "\n  up: ",length(c(rets$up)),
+    "\ndown: ",length(c(rets$down)))
+```
+         
+##### correlation (log2(CPM+1)) of edgeR DEGs             
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=4.8,fig.height=4.8}
+    Ret_mat <- log2(mat_pc[c(rets$up,rets$down),c(Aidx,Bidx)]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.6
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot3 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+``` 
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.SI_Nmur1/0606mod/correlation.edgeR_DEGs.p0.01_FC1.5.pdf",
+    height = 4.8, width = 4.8)
+heatplot3
+dev.off()
+```
+
+
+### volcano plot        
+
+##### p.adjust top40 labeled, volcano         
+
+```{r echo=FALSE, fig.height=9, fig.width=12, warning=FALSE}
+rets$vol
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.SI_Nmur1/0606mod/SI_Nmur1.volcano_edgeR.top40_label.padj0.01_FC1.5.mod20220606.pdf",
+    height = 8, width = 10)
+rets$vol
+dev.off()
+```
+
+```{r echo=FALSE, fig.height=9.6, fig.width=4.8}
+color.test <- colorRampPalette(
+    c(
+      "#03047F", # deep blue
+      "white",
+      "#CC2627"  # deep red
+    )
+  )(100)
+genes <- c(rets$up[1:40],rets$down[1:40])
+
+pheatmap::pheatmap(log2(mat_pc[genes,c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 8, color = color.test,
+         scale = 'row',
+         main = "top40 zscore", gaps_row = c(40), gaps_col = length(Aidx))
+
+```
+
+
+```{r echo=FALSE, fig.height=10.6, fig.width=4.8}
+
+pheatmap::pheatmap(log2(matt_pc[c(rets$up,rev(rets$down)),c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 2, color = color.test, border_color = NA,
+         scale = 'row',
+         main = paste0("DEGs of p.adj<0.01, |FC|>1.5,\nP_up(left): ",length(rets$up),", N_up(right): ",length(rets$down)), gaps_row = length(rets$up), gaps_col = length(Aidx))
+
+```
+
+```{r echo=FALSE, fig.height=10.6, fig.width=4.8}
+
+pheatmap::pheatmap(log2(matt_pc[c(rets$up,rev(rets$down)),c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 2, 
+         #color = color.test,
+         scale = 'none',
+         main = paste0("DEGs of p.adj<0.01, |FC|>1.5,\nP_up(left): ",length(rets$up),", N_up(right): ",length(rets$down)), gaps_row = length(rets$up), gaps_col = length(Aidx))
+
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+## 0606mod
+
+# using tpm, and pad0.01, FC1.5
+pdf(file = "./figures.SI_Nmur1/0606mod/heatmap_padj0.01_FC1.5.log2tpm.zscore.pdf",
+    height = 8.4, width = 4.2)
+pheatmap::pheatmap(log2(matt_pc[c(rets$up,rev(rets$down)),c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 1.3, border_color = NA, 
+         color = color.test,
+         scale = 'row',
+         breaks = seq(-2,2,0.04),
+         main = paste0("DEGs of p.adj<0.01, |FC|>1.5,\nP_up(left): ",length(rets$up),", N_up(right): ",length(rets$down)), gaps_row = length(rets$up), gaps_col = length(Aidx))
+dev.off()
+
+
+pdf(file = "./figures.SI_Nmur1/0606mod/heatmap_padj0.01_FC1.5.log2tpm.pdf",
+    height = 8.4, width = 4.2)
+pheatmap::pheatmap(log2(matt_pc[c(rets$up,rev(rets$down)),c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 1.3, border_color = NA, 
+         #color = color.test,
+         #scale = 'row',
+         #breaks = seq(-2.5,2.5,0.05),
+         main = paste0("DEGs of p.adj<0.01, |FC|>1.5,\nP_up(left): ",length(rets$up),", N_up(right): ",length(rets$down)), gaps_row = length(rets$up), gaps_col = length(Aidx))
+dev.off()
+
+
+#
+write.csv(data.frame(mat_pc[c(rets$up,rev(rets$down)),c(Aidx,Bidx)],
+                     ret$DEG_edgeR[c(rets$up,rev(rets$down)),]),"./figures.SI_Nmur1/0606mod/heatmap_padj0.01_FC1.5.cpm.csv")
+write.csv(data.frame(matt_pc[c(rets$up,rev(rets$down)),c(Aidx,Bidx)],
+                     ret$DEG_edgeR[c(rets$up,rev(rets$down)),]),"./figures.SI_Nmur1/0606mod/heatmap_padj0.01_FC1.5.tpm.csv")
+
+```
+
+
+### GSEA enrichment         
+
+using official software with all filtered protein coding genes       
+     
+modified plot with high resolution is available, if needed        
+
+
+
+## OE        
+
+##### mod20220523          
+
+quantify SI signature markers in SI_P vs SI_N            
+using Overall Expression          
+
+
+
+```{r include=FALSE}
+
+get.semi.random.OE <- function(r,genes.dist.q,b.sign,num.rounds = 1000,full.flag = F){
+  # Previous name: get.random.sig.scores
+  
+  # sign.q : count signature genes located in some bins
+  sign.q<-as.matrix(table(genes.dist.q[b.sign]))
+  # q : located bins
+  q<-rownames(sign.q)
+  idx.all<-c()
+  B<-matrix(data = F,nrow = length(genes.dist.q),ncol = num.rounds)
+  Q<-matrix(data = 0,nrow = length(genes.dist.q),ncol = num.rounds)   # Q has nothing to do here
+  
+  # B each col is an index for same number of genes randomly selected in same bins 
+  for (i in 1:nrow(sign.q)){
+    num.genes<-sign.q[i]
+    if(num.genes>0){
+      # index of all genes in that bin (q[i])
+      idx<-which(is.element(genes.dist.q,q[i]))
+      for (j in 1:num.rounds){
+        idxj<-sample(idx,num.genes) 
+        Q[i,j]<-sum(B[idxj,j]==T)    # stupid Q, always zero matrix, waste of time to doubt it
+        B[idxj,j]<-T
+      }  
+    }
+  }
+  rand.scores<-apply(B,2,function(x) colMeans(r$zscores[x,]))   # get mean of 'zscore's of one round
+  if(full.flag){return(rand.scores)}
+  rand.scores<-rowMeans(rand.scores)  # get mean of num.rounds rounds
+  return(rand.scores)
+}
+
+# input   
+# mat_e : expression matrix(CPM/TPM)  
+# cells_s : cells_selected(character vector)  
+# path_n : pathway_names(character list,path_o="pathwah way")    
+# gene_sign : list(path_o=path_g)  
+#    (path_o : pathway_names in short)   
+#    (path_g : genes in this pathway, character vector)   
+# seed_r : random seed  
+
+# output list:  
+#   list$stat : table of pathway/expressed genes  
+# list$OE : OE of sorted cells  
+# list$mat_z : Zscore of sorted cells/genes
+# list$bar : bar plot  
+# list$heat : heat map  
+
+# mod and debug: 
+#   unit var names and align dimensions  
+# pheat(modified by UncleY with additional class 'pheatmap' and par 'silent=T')  
+# but still pheat object can't plot in rmd, just use 'silent=F' ~  
+
+easy_OE <- function(mat_e,cells_s,path_n,gene_sign,seed_r=7788){
+  
+  ret <- list()
+  ret$tpm <- log2(mat_e[,cells_s]+1)
+  ret$tpm <- ret$tpm[rowSums(ret$tpm)>0,]
+  ret$genes <- rownames(ret$tpm)
+  
+  #
+  set.seed(seed_r)
+  
+  ret$genes.mean <- rowMeans(ret$tpm)
+  ret$genes.sd <- apply(ret$tpm,1,sd)
+  ret$zscores <- sweep(ret$tpm,1,ret$genes.mean,FUN='-')
+  ret$zscores <- sweep(ret$zscores,1,ret$genes.sd,FUN='/')
+  
+  ret$genes.dist <- ret$genes.mean
+  ret$genes.dist.q <- discretize(ret$genes.dist, n.cat=50)
+  ret$sig.scores <- matrix(data=0,nrow=ncol(ret$tpm),ncol=length(gene_sign))
+  
+  ret$sig.names <- names(gene_sign)   # path_o
+  colnames(ret$sig.scores) <- ret$sig.names
+  rownames(ret$sig.scores) <- colnames(ret$tpm)
+  
+  ret$sig.scores.raw <- ret$sig.scores
+  ret$sig.rand.scores <- ret$sig.scores
+  
+  ret$mat_z <- list()
+  ret$mat <- list()
+  
+  ret$heat_z <- list()
+  ret$heat <- list()
+  ret$heat_avg <- list()
+  ret$heatm <- list()
+  
+  ret$bar <- list()
+  
+  ret$stat <- list()
+  
+  for(i in ret$sig.names){
+    b.sign <- is.element(ret$genes, gene_sign[[i]])
+    
+    # scores
+    ret$sig.rand.scores[,i] <- get.semi.random.OE(ret,ret$genes.dist.q,b.sign,num.rounds=100)
+    ret$sig.scores.raw[,i] <- colMeans(ret$zscores[b.sign,])
+    ret$sig.scores[,i] <- ret$sig.scores.raw[,i]-ret$sig.rand.scores[,i]
+    ret$sig.scores[,i] <- round(ret$sig.scores[,i],3)
+    # ret$sig.scores[,i] <- sort(ret$sig.scores[,i],decreasing=TRUE)
+    # here can't sort, could only sort numbers but no names sorted, sort in OE barplot
+    new_order <- order(ret$sig.scores[,i],decreasing = T)
+    
+    # OE barplot    
+    ret$bar[[i]] <- ggplot(data=cbind.data.frame(Score=(ret$sig.scores[,i])[new_order],
+                                                 Name=factor(names(ret$sig.scores[,i])[new_order],levels=(names(ret$sig.scores[,i]))[new_order])),
+                           mapping=aes(x=Score,y=Name)) +
+      geom_bar(stat='identity') +
+      #coord_flip() +
+      labs(y="",x=paste0("Overall Expression of geneset:\n",path_n[[i]]))
+    
+    # mat_z
+    ret$mat_z[[i]] <- zscore_mat(ret$zscores[b.sign,])
+    
+    # sort genes by mean value distance: mean(OE>0) - mean(OE<0) 
+    idx_cells.up <- names(ret$sig.scores[,i][ret$sig.scores[,i]>0])
+    idx_cells.down <- names(ret$sig.scores[,i][ret$sig.scores[,i]<0])
+    
+    idx_genes <- rowSums(ret$mat_z[[i]][,idx_cells.up])-rowSums(ret$mat_z[[i]][,idx_cells.down])
+    idx_genes <- sort(idx_genes,decreasing=TRUE)
+    
+    ret$mat_z[[i]] <- ret$mat_z[[i]][names(idx_genes),rev((names(ret$sig.scores[,i]))[new_order])]
+    ret$mat[[i]] <- mat_e[rownames(ret$mat_z[[i]]),colnames(ret$mat_z[[i]])]
+    
+    
+    # mat_z heatmap
+    ret$heatz[[i]] <- pheatmap::pheatmap(t(t(ret$mat_z[[i]])), cluster_cols=FALSE,cluster_rows=FALSE,fontsiize_row=7.5,
+                              main=paste0("Zscore: ",path_n[[i]]),
+                              #color=colorRampPalette(c("blue","white","red"))(100),
+                              color = color.test,
+                              show_rownames = T, fontsize_row = 1.5,
+                              border_color = NA,
+                              breaks=seq(-2,2,0.04))
+    
+    ret$heat[[i]] <- pheatmap::pheatmap(log2(t(t(ret$mat[[i]]))+1), cluster_cols=FALSE,cluster_rows=FALSE,fontsiize_row=7.5,
+                              main=paste0("log2(tpm+1): ",path_n[[i]]),
+                              #color=colorRampPalette(c("blue","white","red"))(100),
+                              #color = color.test,
+                              #color = colorRampPalette(c("#808080","#B4F8DF","#41F0AE","#05BE78","#099963"))(100),
+                              show_rownames = T, fontsize_row = 1.5,
+                              border_color = NA)
+    
+    # add merged heatmap
+    
+       # calculate, N and P average expression (tpm)
+       cal_avg <- function(mat){
+         data.frame(row.names = rownames(mat),
+                    SI_N0=rowMeans(mat[,grep("SI_N",colnames(mat))]),
+                    SI_P0=rowMeans(mat[,grep("SI_P",colnames(mat))]))
+       }
+    
+    ret$heat_avg[[i]] <- pheatmap::pheatmap(log2(t(t(cal_avg(ret$mat[[i]])))+1),
+                                            cluster_rows = FALSE, cluster_cols = FALSE,show_rownames = F,
+                                            main = "", 
+                              #color = colorRampPalette(c("#808080","#B4F8DF","#41F0AE","#05BE78","#099963"))(100),
+                                            border_color = NA, silent = T)
+    ret$heatm[[i]] <- cowplot::plot_grid(ret$heatz[[i]]$gtable,
+                                         ret$heat_avg[[i]]$gtable,
+                                         ncol=2, rel_widths=c(8,2))
+    
+    # stat 
+    ret$stat[[i]] <- rbind("*** Stat Table ***",
+                           paste0("Pathway: ",path_n[[i]]),
+                           paste0("total genes: ",length(gene_sign[[i]])),
+                           paste0("expressed genes: ",sum(b.sign)),
+                           #paste(ret$genes[b.sign],collapse=" ")
+                           paste(rownames(ret$mat_z[[i]]),collapse=" ")
+    )
+  }
+  
+  
+  # output
+  rett <- list()
+  
+  rett$stat <- ret$stat
+  rett$OE <- ret$sig.scores
+  rett$mat <- ret$mat
+  rett$mat_z <- ret$mat_z
+  rett$bar <- ret$bar
+  rett$heat <- ret$heat
+  rett$heatz <- ret$heatz
+  rett$heatm <- ret$heatm
+  
+  return(rett)
+}
+```
+
+
+
+```{r}
+# SI signatures 
+
+sig_top3k.SI <- as.vector(unlist(read.table("../mod_20220117/tissues_comp/TissueSpecific/uniquelist/DEGs4426.cut0_top3k/list_unique_top3k.g.SI.txt")))
+sig_top2k.SI <- as.vector(unlist(read.table("../mod_20220117/tissues_comp/TissueSpecific/uniquelist/DEGs4426.cut1_top2k/list_unique_top2k.g.SI.txt")))
+sig_top1k.SI <- as.vector(unlist(read.table("../mod_20220117/tissues_comp/TissueSpecific/uniquelist/DEGs4426.cut2_top1k/list_unique_top1k.g.SI.txt")))
+
+```
+
+
+```{r fig.height=7.2, fig.width=4.2}
+OE_result1 <- easy_OE(mat_e = matt_pc,
+               cells_s = colnames(matt_pc),
+               path_n = list(sig_top3k_SI751="sig_top3k_SI751",
+                             sig_top2k_SI532="sig_top2k_SI532",
+                             sig_top1k_SI262="sig_top1k_SI262"), 
+               gene_sign = list(sig_top3k_SI751=sig_top3k.SI,
+                                sig_top2k_SI532=sig_top2k.SI,
+                                sig_top1k_SI262=sig_top1k.SI))
+```
+
+```{r  fig.height=7.2, fig.width=5.4}
+OE_result1$heatm
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+OE_result1$mat_z
+```
+
+
+```{r}
+OE_result1$bar
+```
+
+```{r}
+OE_result1$heat
+```
+
+
+
+
+```{r}
+OE_result1$OE
+```
+
+
+```{r eval=FALSE, include=FALSE}
+## 0606mod
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top1k_zscore.pdf",
+    height = 7.2,
+    width = 4.2)
+OE_result1$heatz$sig_top1k_SI262
+dev.off()
+
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top1k_log2tpm.pdf",
+    height = 7.2,
+    width = 4.2)
+OE_result1$heat$sig_top1k_SI262
+dev.off()
+
+#
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top2k_zscore.pdf",
+    height = 7.2,
+    width = 4.2)
+OE_result1$heatz$sig_top2k_SI532
+dev.off()
+
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top2k_log2tpm.pdf",
+    height = 7.2,
+    width = 4.2)
+OE_result1$heat$sig_top2k_SI532
+dev.off()
+
+#
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top3k_zscore.pdf",
+    height = 7.2,
+    width = 4.2)
+OE_result1$heatz$sig_top3k_SI751
+dev.off()
+
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top3k_log2tpm.pdf",
+    height = 7.2,
+    width = 4.2)
+OE_result1$heat$sig_top3k_SI751
+dev.off()
+
+## merged heatmap
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top1k_zscore.add_log2avgtpm.pdf",
+    height = 7.2,
+    width = 5.4)
+OE_result1$heatm$sig_top1k_SI262
+dev.off()
+
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top2k_zscore.add_log2avgtpm.pdf",
+    height = 7.2,
+    width = 5.4)
+OE_result1$heatm$sig_top2k_SI532
+dev.off()
+
+pdf("./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top3k_zscore.add_log2avgtpm.pdf",
+    height = 7.2,
+    width = 5.4)
+OE_result1$heatm$sig_top3k_SI751
+dev.off()
+
+#
+write.csv(OE_result1$mat$sig_top1k_SI262,"./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top1k_tpm.csv")
+write.csv(OE_result1$mat$sig_top2k_SI532,"./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top2k_tpm.csv")
+write.csv(OE_result1$mat$sig_top3k_SI751,"./figures.SI_Nmur1/0606mod/SI_Nmur1.OE_SIsignature.top3k_tpm.csv")
+
+```
+
+
+```{r paged.print=FALSE}
+OE_melt <- reshape2::melt(OE_result1$OE)
+
+OE_melt$cnt <- as.character(OE_melt$Var1)
+OE_melt$cnt <- sapply(OE_melt$cnt, function(x){strsplit(x,"1|2|3|4|5|6|7|8")[[1]][1]})
+OE_melt$cnt <- factor(as.character(OE_melt$cnt ),
+                      levels = c("SI_P","SI_N"))
+
+OE_melt
+```
+
+```{r fig.width=6, fig.height=5}
+gg.OE <- ggplot(OE_melt, aes(x = cnt, y=value,color=cnt)) +
+  #geom_boxplot() +
+    #ylim(c(-0.25,0.35)) +
+  geom_boxplot()+
+    geom_jitter(width = 0.12) +
+  #facet_grid(rows = "Var2") + 
+  facet_wrap(~Var2)+
+    #stat_summary(fun.y=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "t.test",
+                               comparisons = list(c("SI_P","SI_N")),
+                               label.y = c(0.6)) +
+      #scale_color_manual(values = c("#5A5C5F","#0000C8","#FDB911")) +
+    labs(x="",y="Overall Expression of SI Signatures") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + ylim(c(-0.65,0.65))
+gg.OE
+```
+```{r eval=FALSE, include=FALSE}
+ggsave("./figures.SI_Nmur1/SI_Nmur1.OE_SIsignature.boxplot.ttest.pdf",
+       plot = gg.OE,
+       width = 6, height = 5)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

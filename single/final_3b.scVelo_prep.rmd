@@ -1,0 +1,91 @@
+---
+output:
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+# preparation for scVelo        
+
+      
+
+##### load dependancies           
+```{r message=FALSE, warning=FALSE, include=FALSE} 
+source("F:/Rstudio_analysis/analysis.10x.r")
+```  
+
+
+## load obj            
+
+
+```{r}
+GEX.seur <- readRDS("../scEOS.pure_Anno1_0708.rds")
+GEX.seur
+```
+
+
+## add velocity       
+
+### output                              
+
+mainly follow the official scVelo tutorial            
+https://smorabit.github.io/tutorials/8_velocyto/      
+
+#### save metadata table              
+
+
+```{r paged.print=FALSE}
+GEX.seur@meta.data[,grep("snn|ANN",colnames(GEX.seur@meta.data))] <- NULL
+
+GEX.seur$barcode <- rownames(GEX.seur@meta.data)
+GEX.seur$UMAP_1 <- GEX.seur@reductions$umap@cell.embeddings[,1]
+GEX.seur$UMAP_2 <- GEX.seur@reductions$umap@cell.embeddings[,2]
+
+head(GEX.seur@meta.data)
+```
+
+
+```{r}
+sum(duplicated(GEX.seur$barcode))
+```
+
+```{r eval=FALSE, include=FALSE}
+write.csv(GEX.seur@meta.data, 
+          "./metadata.csv", quote = F, row.names = F)
+```
+
+
+#### write counts matrix               
+
+```{r eval=FALSE, include=FALSE}
+#writeMM(GEX.seur@assays[['SCT']]@counts, file = "./counts.SCT.mtx")
+writeMM(GEX.seur@assays[['RNA']]@counts, file = "./counts.mtx")
+```
+
+
+#### write pca                
+
+```{r eval=FALSE, include=FALSE}
+write.csv(GEX.seur@reductions$pca@cell.embeddings, file = "./pca.csv", quote = F, row.names = F)
+```
+
+
+#### write filtered genes          
+
+```{r eval=FALSE, include=FALSE}
+write.table(data.frame(gene=rownames(GEX.seur)), file = "./gene_names.csv",
+            quote = F, row.names = F, col.names = F)
+write.table(data.frame(gene=VariableFeatures(GEX.seur)), file = "./vargene_names.csv",
+            quote = F, row.names = F, col.names = F)
+```
+
+
+
+
+
+
+
+
+
+

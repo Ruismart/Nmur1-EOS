@@ -1,0 +1,1035 @@
+---
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+
+# 20220623_10x_ZKW         
+
+analysis of scEOS                  
+       
+##### demo data(1/10~1/5 datasize)         
+loading 18,000 cells, expected 8,000 cells, but only called 377 cells             
+
+because of the small number of called cells:         
+first to try filtered matrix normally          
+second to try raw matrix and manually call cells using 'UMI counts > 100'           
+get 3,000 EOS cells more but with very low counts, it should be fine after increasing the datasize           
+
+
+##### plus data(full datasize)                          
+##### 1. QC and initial analysis             
+cell calling >3.6k and EOS >90%              
+with other celltypes(Epthelium/Fibroblast/Macrophage/DC/T) together        
+           
+initial clustering couldn't separate EOS into distinct subclusters        
+more likely grouped by nFeature levels instead         
+hard to give a conclusion to match bulk RNAseq data            
+
+##### 2. cleaning-up and re-clustering           
+only EOS kept       
+naturally grouped into Nmur1+ and Nmur1- parts            
+seems like five states: Nmur1+ EOS1/2, Nmur1- EOS3/4/5       
+check markers and then merge into three only: Nmur1+ EOS1, Nmur1- EOS2/3        
+      
+          
+##### 3. trajectory         
+check monocle and RNAvelocity           
+
+
+
+
+
+```{r message=FALSE, warning=FALSE}
+source("/Shared_win/projects/RNA_normal/analysis.10x.r")
+```
+
+## load 10x data                
+
+```{r}
+filt.10x <- Read10X(data.dir = "../output_plus/filtered_feature_bc_matrix/")
+```
+
+
+```{r}
+#GEX <- filt.10x$`Gene Expression`
+#FB <- filt.10x$`Antibody Capture`
+# GEX only
+GEX <- filt.10x
+```
+
+
+### check datasets   
+```{r message=FALSE, warning=FALSE}
+dim(GEX)
+GEX[1:6,1:6]
+```
+
+
+
+## GEX    
+    
+mainly follow https://satijalab.org/seurat/articles/pbmc3k_tutorial.html    
+
+
+```{r message=FALSE, warning=FALSE}
+GEX.seur <- CreateSeuratObject(counts = GEX,
+                               min.cells = 3,
+                               min.features = 200,
+                               project = "EOS_plus")
+GEX.seur
+```
+
+#### MT genes   
+```{r}
+grep("^mt-",rownames(GEX),value = T)
+```
+
+```{r}
+MT_gene <- grep("^mt-",rownames(GEX),value = T)
+MT_filt <- MT_gene %in% rownames(GEX.seur@assays[['RNA']]@counts)
+GEX.seur[["percent.mt"]] <- PercentageFeatureSet(GEX.seur, features = MT_gene[MT_filt])
+
+
+# Visualize QC metrics as a violin plot
+VlnPlot(GEX.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.01) + geom_point(alpha=0.1)
+```
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "percent.mt") 
+plotb <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") 
+plota + plotb
+```
+
+at first try a loose cutoff              
+```{r}
+#GEX.seur <- subset(GEX.seur, subset = percent.mt < 5 & nFeature_RNA < 4000 & nCount_RNA < 20000)
+GEX.seur <- subset(GEX.seur, subset = percent.mt < 10)
+GEX.seur
+```
+
+
+```{r}
+VlnPlot(GEX.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.01) + geom_point(alpha=0.1)
+```
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "percent.mt") 
+plotb <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") 
+plota + plotb
+```
+
+#### check cellcycle    
+```{r}
+s.genes <- Hmisc::capitalize(tolower(cc.genes.updated.2019$s.genes))
+g2m.genes <- Hmisc::capitalize(tolower(cc.genes.updated.2019$g2m.genes))
+
+GEX.seur <- CellCycleScoring(GEX.seur,
+                             s.features = s.genes,
+                             g2m.features = g2m.genes)
+```
+
+```{r}
+VlnPlot(GEX.seur, features = c("S.Score", "G2M.Score"), 
+        #group.by = "FB.info", 
+    ncol = 2, pt.size = 0.1)
+```
+
+```{r message=FALSE, warning=FALSE}
+GEX.seur.cc <- GEX.seur
+
+GEX.seur.cc <- NormalizeData(GEX.seur.cc)
+GEX.seur.cc <- FindVariableFeatures(GEX.seur.cc)
+GEX.seur.cc <- ScaleData(GEX.seur.cc)
+Idents(GEX.seur.cc) <- "Phase"
+RidgePlot(GEX.seur.cc, features = c("Pcna", "Top2a", "Mcm6", "Mki67"), ncol = 2)
+```
+
+```{r message=FALSE, warning=FALSE}
+GEX.seur.cc <- RunPCA(GEX.seur.cc, features = c(s.genes, g2m.genes))
+DimPlot(GEX.seur.cc, reduction = 'pca')
+```
+
+##### nearly no cycling        
+
+
+### Markers and Clusters            
+
+#### Normalizing          
+
+```{r}
+GEX.seur <- NormalizeData(GEX.seur, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+```{r message=FALSE, warning=FALSE,varselection,fig.width=12,fig.height=4}
+GEX.seur <- FindVariableFeatures(GEX.seur, selection.method = "vst", nfeatures = 1500)
+
+# Identify the 10 most highly variable genes
+top20 <- head(VariableFeatures(GEX.seur), 20)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(GEX.seur)
+plot2 <- LabelPoints(plot = plot1, points = top20, repel = TRUE)
+plot1 + plot2
+```
+
+```{r}
+head(VariableFeatures(GEX.seur), 100)
+```
+
+```{r}
+GEX.seur <- ScaleData(GEX.seur, features = rownames(GEX.seur))
+```
+
+#### PCA       
+
+```{r}
+# exclude MT genes,  and more possible contamination genes
+
+#DIG <- grep("^Tra|^Trb|^Trg|^Trd|^Tcr|^Igm|^Igh|^Igk|^Igl|Jchain|^Hsp|^Rps|^Rpl|Hbb-|Hba-|^Dnaj|^AY|^Gm|^Hist",rownames(GEX.seur),value = T)
+
+DIG <- grep("^Tra|^Trb|^Trg|^Trd|^Tcr|^Igm|^Igh|^Igk|^Igl|Jchain|Mzb1|Lars2|^Hsp|^Rps|^Rpl|Hbb-|Hba-|^Dnaj|^AY|^Gm|^Hist|^0|^1|^2|^3|^4|^5|^6|^7|^8|^9",
+            rownames(GEX.seur),value = T)
+CC_gene <- Hmisc::capitalize(tolower(as.vector(unlist(cc.genes.updated.2019))))
+
+
+GEX.seur <- RunPCA(GEX.seur, features = setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,
+                                                  DIG, 
+                                                  CC_gene) ))
+```
+
+```{r}
+length(setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,DIG, CC_gene) ))
+head(setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,DIG, CC_gene) ))
+```
+
+
+```{r pca,fig.width=12,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 2:3)
+```
+
+```{r pcsheat,fig.width=12,fig.height=12}
+DimHeatmap(GEX.seur, dims = 1:16, cells = 1500, balanced = TRUE,ncol = 4)
+```
+
+##### decide PCs to use          
+     
+```{r}
+ElbowPlot(GEX.seur,ndims = 40)
+```
+
+
+```{r}
+PCs <- 1:15
+```
+
+```{r}
+GEX.seur <- FindNeighbors(GEX.seur, dims = PCs, k.param = 10)
+GEX.seur <- FindClusters(GEX.seur, resolution = 0.6)
+```
+
+#### Run UMAP/tSNE    
+
+```{r}
+GEX.seur <- RunTSNE(GEX.seur, dims=PCs)
+GEX.seur <- RunUMAP(GEX.seur, dims=PCs, n.neighbors = 10)
+```
+
+```{r fig.width=10.5,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "tsne", label = T) + DimPlot(GEX.seur, reduction = "umap", label = T)
+```
+```{r fig.width=10.5,fig.height=4.5}
+FeaturePlot(GEX.seur, reduction = "umap", features = c("nFeature_RNA","nCount_RNA"),ncol = 2)
+```
+
+### check markers              
+
+```{r fig.width=6, fig.height=7.6}
+DotPlot(GEX.seur, features = rev(c("Ptprc",
+                                   "Cd3d","Cd3e",
+                                   "Fcer1g",
+                                   "Itgam","Ccr3","Fcgr3","Siglecf",
+                                   "Adgre1","Itga4","Il5ra",
+                                   "Nmur1",
+                                   "Il1b","Ccl4","Ccl6","Csf1",
+                                   "Pecam1",
+                                   "Epcam","Tspan8","Krt19","Cldn7",
+                                   "Cd3g","Ifng","Ramp3","Ctla4",
+                                   "Dcn","Col1a1","Col1a2","Col3a1",
+                                   "Rgl1",
+                                   "Ly6e","Siglech",
+                                   "Itgae","Pkib","Havcr2","Ly6c2",
+                                   "H2-DMb1","H2-Eb1","H2-Ab1","H2-Aa",
+                                   "Apoe","Lyz2","Ms4a6c","Mafb",
+                                   "C1qa","C1qb","C1qc")))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+
+
+### find markers             
+
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+Idents(GEX.seur) <- "seurat_clusters"
+
+#GEX.markers.pre <- FindAllMarkers(GEX.seur, only.pos = TRUE, min.pct = 0.1,
+#                                  test.use = "MAST",
+#                                  logfc.threshold = 0.25)
+GEX.markers.pre <- read.table("10x_ZKW_GEX.markers.pre.0705.csv", header = TRUE, sep = ",")
+GEX.markers.pre %>% group_by(cluster) %>% top_n(n = 8, wt = avg_log2FC)
+```
+
+```{r eval=FALSE, include=FALSE}
+write.table(GEX.markers.pre, 
+            "10x_ZKW_GEX.markers.pre.0705.csv", 
+            col.names = TRUE,
+            row.names = FALSE,
+            quote = F,
+            sep = ",")
+```
+
+
+```{r}
+GEX.markers.pre$cluster <- factor(as.character(GEX.markers.pre$cluster),
+                          levels = levels(GEX.seur$seurat_clusters))
+
+markers.pre_t8 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.25 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 8, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t16 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.25 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 16, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t32 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 32, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t48 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 48, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+```
+
+
+```{r fig.width=6, fig.height=9.6}
+DotPlot(GEX.seur, features = rev(markers.pre_t48[1:64]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t48[65:128]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t48[129:192]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t48[193:256]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t48[257:320]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+```{r fig.width=6, fig.height=3.6}
+DotPlot(GEX.seur, features = rev(markers.pre_t48[321:336]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+```{r fig.width=12,fig.height=36}
+FeaturePlot(GEX.seur,features = markers.pre_t48[1:64])
+FeaturePlot(GEX.seur,features = markers.pre_t48[65:128])
+FeaturePlot(GEX.seur,features = markers.pre_t48[129:192])
+FeaturePlot(GEX.seur,features = markers.pre_t48[193:256])
+FeaturePlot(GEX.seur,features = markers.pre_t48[257:320])
+```
+
+
+```{r fig.width=12,fig.height=9}
+FeaturePlot(GEX.seur,features = markers.pre_t48[321:336])
+```
+
+
+### check markers          
+
+```{r fig.width=6, fig.height=7.6}
+DotPlot(GEX.seur, features = rev(c("Ptprc",
+                                   "Cd3d","Cd3e",
+                                   "Fcer1g",
+                                   "Itgam","Ccr3","Fcgr3","Siglecf",
+                                   "Adgre1","Itga4","Il5ra",
+                                   "Nmur1",
+                                   "Il1b","Ccl4","Ccl6","Csf1",
+                                   "Pecam1",
+                                   "Epcam","Tspan8","Krt19","Cldn7",
+                                   "Cd3g","Ifng","Ramp3","Ctla4",
+                                   "Dcn","Col1a1","Col1a2","Col3a1",
+                                   "Rgl1",
+                                   "Ly6e","Siglech",
+                                   "Itgae","Pkib","Havcr2","Ly6c2",
+                                   "H2-DMb1","H2-Eb1","H2-Ab1","H2-Aa",
+                                   "Apoe","Lyz2","Ms4a6c","Mafb",
+                                   "C1qa","C1qb","C1qc")))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+```{r}
+length(c("Ptprc",
+                                   "Cd3d","Cd3e",
+                                   "Fcer1g",
+                                   "Itgam","Ccr3","Fcgr3","Siglecf",
+                                   "Adgre1","Itga4","Il5ra",
+                                   "Nmur1",
+                                   "Il1b","Ccl4","Ccl6","Csf1",
+                                   "Pecam1",
+                                   "Epcam","Tspan8","Krt19","Cldn7",
+                                   "Cd3g","Ifng","Ramp3","Ctla4",
+                                   "Dcn","Col1a1","Col1a2","Col3a1",
+                                   "Rgl1",
+                                   "Ly6e","Siglech",
+                                   "Itgae","Pkib","Havcr2","Ly6c2",
+                                   "H2-DMb1","H2-Eb1","H2-Ab1","H2-Aa",
+                                   "Apoe","Lyz2","Ms4a6c","Mafb",
+                                   "C1qa","C1qb","C1qc"))
+```
+
+
+```{r fig.width=12,fig.height=27}
+FeaturePlot(GEX.seur, features = c("Ptprc",
+                                   "Cd3d","Cd3e",
+                                   "Fcer1g",
+                                   "Itgam","Ccr3","Fcgr3","Siglecf",
+                                   "Adgre1","Itga4","Il5ra",
+                                   "Nmur1",
+                                   "Il1b","Ccl4","Ccl6","Csf1",
+                                   "Pecam1",
+                                   "Epcam","Tspan8","Krt19","Cldn7",
+                                   "Cd3g","Ifng","Ramp3","Ctla4",
+                                   "Dcn","Col1a1","Col1a2","Col3a1",
+                                   "Rgl1",
+                                   "Ly6e","Siglech",
+                                   "Itgae","Pkib","Havcr2","Ly6c2",
+                                   "H2-DMb1","H2-Eb1","H2-Ab1","H2-Aa",
+                                   "Apoe","Lyz2","Ms4a6c","Mafb",
+                                   "C1qa","C1qb","C1qc"), ncol = 4)
+```
+
+
+
+```{r fig.width=12,fig.height=18}
+FeaturePlot(GEX.seur, features = c("Cavin1","Pmp22","Loxl2","Sfrp1",
+                                   "Bmp1","Dlc1","Dpt","Ogn",
+                                   "Abca8a","Lamc1","Fxyd1","Bmp4",
+                                   "Cxcr6","Gimap3","Sh2d2a","Zap70",
+                                   "Ccl11","Fbln5","Lpl","Ddr2",
+                                   "Cygb","Bicc1","Eln","Clec3b",
+                                   "Tnxb","Ehd2","Meg3","Il2rb",
+                                   "Tns1","Lamb1","Loxl1","Nid1"), ncol = 4)
+```
+
+
+```{r fig.width=12,fig.height=18}
+FeaturePlot(GEX.seur, features = c("Mmp2","Lama4","Lama2","Dkk3",
+                                   "Igfbp3","Cxcl12","Axl","Adamts1",
+                                   "Wnt4a","Mrc2","C3","Hmcn2",
+                                   "Ackr3","Gulp1","Gja1","Pdgfra",
+                                   "Ctsw","Rcn3","Mgp","Cavin2",
+                                   "Cavin3","Rbms3","Nnmt","Spon2",
+                                   "Lhfp","Tcf21","Nkg7","Akap12",
+                                   "Nt5e","Trbc1","Amotl1","Cryab"), ncol = 4)
+```
+
+
+
+
+```{r}
+table(GEX.seur$seurat_clusters)
+```
+
+```{r fig.width=5,fig.height=6}
+sl_stat <- table(GEX.seur$seurat_clusters)
+barplot(sl_stat,ylim = c(0,1200),col = c(scales::hue_pal()(8)),
+        main = "cluster statistics",cex.names = 0.75)
+text(x=1:8*1.2-0.45,y=sl_stat+51,paste0(sl_stat,"\n",100*round(as.numeric(sl_stat/sum(sl_stat)),4),"%"),cex = 0.75)
+```
+
+
+```{r fig.width=5,fig.height=6}
+sl_stat <- table(GEX.seur$seurat_clusters)
+barplot(sl_stat,ylim = c(0,1200),col = c(scales::hue_pal()(8))[c(rep(1,5),6:8)],
+        main = "cluster statistics",cex.names = 0.75)
+text(x=1:8*1.2-0.45,y=sl_stat+51,paste0(sl_stat,"\n",100*round(as.numeric(sl_stat/sum(sl_stat)),4),"%"),cex = 0.75)
+```
+
+```{r}
+sum(table(GEX.seur$seurat_clusters)[1:5])
+sum(table(GEX.seur$seurat_clusters))
+```
+
+```{r}
+sum(table(GEX.seur$seurat_clusters)[1:5])/sum(table(GEX.seur$seurat_clusters))
+```
+
+
+```{r fig.width=6, fig.height=7.6}
+DotPlot(GEX.seur, features = rev(c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171"))
+        )  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+```{r fig.width=12, fig.height=12.6}
+VlnPlot(GEX.seur, features = c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171"))  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+#### DoubletFinder       
+
+```{r}
+library(DoubletFinder)
+```
+
+```{r include=FALSE}
+# to find a better pk
+sweep.res.list <- paramSweep_v3(GEX.seur, PCs = PCs, sct = FALSE) 
+```
+
+```{r echo=FALSE}
+for(i in 1:length(sweep.res.list)){
+  if(length(sweep.res.list[[i]]$pANN[is.nan(sweep.res.list[[i]]$pANN)]) !=0){
+    if(i!=1){
+      sweep.res.list[[i]] <- sweep.res.list[[i-1]]
+    }else(
+      sweep.res.list[[i]] <- sweep.res.list[[i+1]]
+    )
+  }
+}
+sweep.stats <- summarizeSweep(sweep.res.list, GT=FALSE)
+bcmvn <- find.pK(sweep.stats)
+```
+
+```{r echo=FALSE}
+pk_v <- as.numeric(as.character(bcmvn$pK))
+pk_good <- pk_v[bcmvn$BCmetric==max(bcmvn$BCmetric)]
+```
+
+```{r echo=FALSE}
+# specify expected doublet number     
+nExp_poi <- round(0.05*length(colnames(GEX.seur)))
+
+GEX.seur <- doubletFinder_v3(GEX.seur, PCs = PCs, pN = 0.25, pK = pk_good, 
+                             nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+colnames(GEX.seur@meta.data)[ncol(GEX.seur@meta.data)] <- "DoubletFinder0.05"
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# specify expected doublet number     
+nExp_poi <- round(0.1*length(colnames(GEX.seur)))
+
+GEX.seur <- doubletFinder_v3(GEX.seur, PCs = PCs, pN = 0.25, pK = pk_good, 
+                             nExp = nExp_poi, reuse.pANN = FALSE, sct = FALSE)
+colnames(GEX.seur@meta.data)[ncol(GEX.seur@meta.data)] <- "DoubletFinder0.1"
+```
+
+
+
+```{r echo=FALSE, fig.height=4.5, fig.width=12}
+DimPlot(GEX.seur, reduction = "umap", group.by = "DoubletFinder0.05") +
+  DimPlot(GEX.seur, reduction = "umap", label = T)
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=12}
+DimPlot(GEX.seur, reduction = "umap", group.by = "DoubletFinder0.1") +
+  DimPlot(GEX.seur, reduction = "umap", label = T)
+```
+
+```{r echo=FALSE, fig.height=4.5, fig.width=10.8}
+FeaturePlot(GEX.seur, reduction = "umap", features = c("nFeature_RNA","nCount_RNA"))
+```
+
+#### preAnno            
+
+
+```{r}
+GEX.seur$preAnno1 <- as.character(GEX.seur$seurat_clusters)
+
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(0)] <- "EOS1"
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(1)] <- "EOS2"
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(2)] <- "EOS3"
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(3)] <- "EOS4"
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(4)] <- "EOS5"
+
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(6)] <- "EpC/FIB"
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(5)] <- "MAC"
+GEX.seur$preAnno1[GEX.seur$preAnno1 %in% c(7)] <- "DC/T"
+
+GEX.seur$preAnno1 <- factor(GEX.seur$preAnno1,
+                            levels = c(paste0("EOS",1:5),
+                                       "EpC/FIB",
+                                       "MAC",
+                                       "DC/T"))
+```
+
+
+```{r}
+GEX.seur$preAnno2 <- as.character(GEX.seur$seurat_clusters)
+
+GEX.seur$preAnno2[GEX.seur$preAnno2 %in% c(0:4)] <- "EOS"
+
+GEX.seur$preAnno2[GEX.seur$preAnno2 %in% c(6)] <- "EpC/FIB"
+GEX.seur$preAnno2[GEX.seur$preAnno2 %in% c(5)] <- "MAC"
+GEX.seur$preAnno2[GEX.seur$preAnno2 %in% c(7)] <- "DC/T"
+
+GEX.seur$preAnno2 <- factor(GEX.seur$preAnno2,
+                            levels = c("EOS",
+                                       "EpC/FIB",
+                                       "MAC",
+                                       "DC/T"))
+```
+
+
+
+```{r}
+ggsci::pal_igv("default")(40)
+```
+
+```{r fig.height=8, fig.width=9}
+scales::show_col(ggsci::pal_igv("default")(49))
+```
+
+
+```{r}
+color.pre1 <-  ggsci::pal_igv("default")(49)[c(1,5,7,31,33,
+                                               19,
+                                               16,
+                                               2)]
+color.pre2 <- ggsci::pal_igv("default")(49)[c(7,
+                                               19,
+                                               16,
+                                               2)]
+```
+
+
+```{r fig.width=12,fig.height=5.5}
+(DimPlot(GEX.seur, reduction = "umap", group.by = "preAnno1", label = T, label.size = 3.5,repel = T,
+          cols =color.pre1) + NoLegend()) +
+  (DimPlot(GEX.seur, reduction = "umap", group.by = "preAnno2", label = T, label.size = 3.5,repel = T,
+          cols =color.pre2) + NoLegend())
+```
+
+```{r fig.width=6, fig.height=7.6}
+DotPlot(GEX.seur, features = rev(c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171")), group.by = "preAnno1")  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+```{r fig.width=12, fig.height=12.6}
+VlnPlot(GEX.seur, features = c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171"), group.by = "preAnno1")  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+```{r fig.width=12, fig.height=36}
+VlnPlot(GEX.seur, features = c("Ptprc",
+                                   "Cd3d","Cd3e",
+                                   "Fcer1g",
+                                   "Itgam","Ccr3","Fcgr3","Siglecf",
+                                   "Adgre1","Itga4","Il5ra",
+                                   "Nmur1",
+                                   "Il1b","Ccl4","Ccl6","Csf1",
+                                   "Pecam1",
+                                   "Epcam","Tspan8","Krt19","Cldn7",
+                                   "Cd3g","Ifng","Ramp3","Ctla4",
+                                   "Dcn","Col1a1","Col1a2","Col3a1",
+                                   "Rgl1",
+                                   "Ly6e","Siglech",
+                                   "Itgae","Pkib","Havcr2","Ly6c2",
+                                   "H2-DMb1","H2-Eb1","H2-Ab1","H2-Aa",
+                                   "Apoe","Lyz2","Ms4a6c","Mafb",
+                                   "C1qa","C1qb","C1qc"), group.by = "preAnno1")  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+#### re-check QC                
+
+```{r}
+#color.pre1 <- c(scales::hue_pal()(8))
+```
+
+
+```{r fig.width=12,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2, group.by = "preAnno1",cols =color.pre1) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4, group.by = "preAnno1",cols =color.pre1)
+```
+
+
+```{r fig.width=12,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2, group.by = "preAnno2",cols =color.pre2) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4, group.by = "preAnno2",cols =color.pre2)
+```
+
+
+```{r fig.width=15, fig.height=4.5}
+VlnPlot(GEX.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno1",cols =color.pre1)
+```
+
+```{r fig.width=15, fig.height=4.5}
+VlnPlot(subset(GEX.seur,subset=nCount_RNA<15000), features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno1",cols =color.pre1)
+```
+
+
+```{r fig.width=15, fig.height=4.5}
+VlnPlot(GEX.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno2",cols =color.pre2)
+```
+
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "percent.mt", group.by = "preAnno2",cols =color.pre2) 
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 40))
+plotb <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "preAnno2",cols =color.pre2)
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 4000))
+plota + plotb
+```
+
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "percent.mt", group.by = "preAnno1",cols =color.pre1) 
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 40))
+plotb <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "preAnno1",cols =color.pre1)
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 4000))
+plota + plotb
+```
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(subset(GEX.seur,subset=nCount_RNA<15000), feature1 = "nCount_RNA", feature2 = "percent.mt", group.by = "preAnno1",cols =color.pre1) 
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 40))
+plotb <- FeatureScatter(subset(GEX.seur,subset=nCount_RNA<15000), feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "preAnno1",cols =color.pre1)
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 4000))
+plota + plotb
+```
+
+
+```{r}
+table(data.frame(preA1=GEX.seur$preAnno1,
+                 dbt0.05=GEX.seur$DoubletFinder0.05))
+table(data.frame(preA1=GEX.seur$preAnno1,
+                 dbt0.1=GEX.seur$DoubletFinder0.1))
+```
+
+
+```{r}
+#saveRDS(GEX.seur,"scEOS.preAnno_0705.rds")
+```
+
+
+## check markers           
+
+
+### Nmur1 SS2                
+
+Nmur1 P or N, DEGs using 'FC>1.5 padj<0.01'               
+
+
+```{r}
+proc_DEG <- function(deg, p.cut=0.05, FC.cut = 2, padj=TRUE, abs=TRUE, mat_cut=NULL, gene_cut=NULL){
+    rownames(deg) <- deg$gene
+    
+    if(padj==TRUE){
+        deg <- deg %>% filter(padj < p.cut)
+    }else{
+        deg <- deg %>% filter(pvalue < p.cut)
+    }
+    
+    if(abs==TRUE){
+        deg <- deg %>% filter(abs(FC) > FC.cut)
+    }else if(FC.cut >0){
+        deg <- deg %>% filter(FC > FC.cut)
+    }else{
+        deg <- deg %>% filter(FC < FC.cut)
+    }
+    
+    if(!is.null(mat_cut)){
+        deg <- deg[rownames(deg) %in% rownames(mat_cut),]
+    }
+    if(!is.null(gene_cut)){
+        deg <- deg[rownames(deg) %in% gene_cut,]
+    }
+    return(deg)
+}
+```
+
+
+```{r paged.print=FALSE}
+DEG_0608.SI_PN <- read.table("/Shared_win/projects/202205_Nmur1EOS/final3.1/edgeR_DEGs.SI_Nmur1.SI_P_vs_SI_N.csv", 
+                           header = T, sep = ",")
+rownames(DEG_0608.SI_PN) <- DEG_0608.SI_PN$gene
+head(DEG_0608.SI_PN)
+```
+
+```{r}
+DEG_0608.SI_Pup <- proc_DEG(DEG_0608.SI_PN, abs = FALSE, p.cut = 0.01, FC.cut = 1.5, padj = T)$gene
+DEG_0608.SI_Pup
+```
+
+```{r}
+DEG_0608.SI_Nup <- proc_DEG(DEG_0608.SI_PN, abs = FALSE, p.cut = 0.01, FC.cut = -1.5, padj = T)$gene
+DEG_0608.SI_Nup
+```
+
+##### signature score function               
+```{r include=FALSE}
+## The code below is from Adam Hamber
+## 2D scoring by Itay
+get_controls <- function(counts, gene.list, verbose=F, control.genes.per.gene=10)
+{
+    # Itay: "Such scores are inevitably correlated with cell complexity so to avoid 
+    # that I subtract a "control" score which is generated by averaging over a control 
+    # gene set. Control gene sets are chosen to contain 100 times more genes than the 
+    # real gene set (analogous to averaging over 100 control sets of similar size) and 
+    # to have the same distribution of population/bulk - based expression levels as the 
+    # real gene set, such that they are expected to have the same number of "zeros" and 
+    # to eliminate the correlation with complexity."
+    # ---------------------------------------------------------------------------------
+    # Going to find control points by finding the closest genes in terms of expression level and % of the time we observe it
+    if(verbose){cat(sprintf("Finding %s background genes based on similarity to given gene set [%s genes] \n", 
+                            control.genes.per.gene*length(gene.list), length(gene.list)))}
+    cat("Summarizing data \n")
+    summary = data.frame(gene=row.names(counts), mean.expr = Matrix::rowMeans(counts), fract.zero = Matrix::rowMeans(counts==0), stringsAsFactors = F)
+    #summary = data.frame(gene=row.names(counts), mean.expr = apply(counts,1,mean), fract.zero = apply(counts==0,1,mean), stringsAsFactors = F)
+    summary$mean.expr.s = scale(summary$mean.expr)
+    summary$fract.zero.s = scale(summary$fract.zero)
+    actual.genes = summary[summary$gene %in% gene.list,]
+    background.genes = summary[!summary$gene %in% gene.list,]
+    
+    #find the 10 closest genes to each cell cycle marker gene and add them to the lists of control genes
+    get_closest_genes <- function(i)
+    {
+        background.genes$dist = sqrt((background.genes$mean.expr.s - actual.genes$mean.expr.s[i])^2 + 
+                                         (background.genes$fract.zero.s - actual.genes$fract.zero.s[i])^2)
+        ordered = background.genes$gene[order(background.genes$dist)]
+        ordered = ordered[!ordered %in% controls] # don't take genes that already appear in the list 
+        closest = head(ordered, n=control.genes.per.gene)
+        return(closest)
+    }
+    controls = c();
+    
+    for (i in 1:length(gene.list)){
+        #info(sprintf("Finding %s control genes for %s", control.genes.per.gene, gene.list[i]))
+        closest = get_closest_genes(i)
+        #info(sprintf("Found %s: ", length(closest)))
+        controls = unique(c(controls, closest))
+    }
+    
+    if(verbose){cat(sprintf("Control gene selection complete. %s genes found. \n", length(controls)))}
+    #print(controls)
+    return(controls)
+}
+
+## Define calculate function
+calculate_signature_score <- function(count_matrix, gene_list){
+    control_gene <- get_controls(counts = count_matrix,
+                                 gene.list = gene_list)
+    signature_score <- colMeans(count_matrix[gene_list, ], na.rm = TRUE) - 
+        colMeans(count_matrix[control_gene, ], na.rm = TRUE)
+    return(signature_score)
+}
+```
+
+
+
+```{r}
+score.SI_Nup <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          DEG_0608.SI_Nup)
+score.SI_Pup <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          DEG_0608.SI_Pup)
+```
+
+
+```{r}
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SI_Nup,
+                        "score.SI_Nup")
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SI_Pup,
+                        "score.SI_Pup")
+```
+
+
+
+```{r fig.width=5, fig.height=6}
+vln.score.SI_Nup <- GEX.seur@meta.data %>%
+    ggplot(aes(preAnno1, score.SI_Nup, color = preAnno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS1","EOS2"),
+                                                  c("EOS1","EOS3"),
+                                                  c("EOS1","EOS4"),
+                                                  c("EOS1","EOS5")),
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+     scale_color_manual(values = color.pre1) +
+    labs(x="",title="Signature Score of SI Nmur1_PvsN, Nup") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+
+vln.score.SI_Pup <- GEX.seur@meta.data %>%
+    ggplot(aes(preAnno1, score.SI_Pup, color = preAnno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS5","EOS4"),
+                                                  c("EOS5","EOS3"),
+                                                  c("EOS5","EOS2"),
+                                                  c("EOS1","EOS5")),
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+    scale_color_manual(values = color.pre1) +
+    labs(x="",title="Signature Score of SI Nmur1_PvsN, Pup") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+#vln.score.SI_Pup
+#+ NoLegend()
+```
+
+
+```{r fig.width=10, fig.height=6}
+cowplot::plot_grid(
+  vln.score.SI_Nup,
+  vln.score.SI_Pup,
+  ncol = 2
+)
+```
+
+
+## cleaning up                
+
+### recheck            
+
+distributions of nFeature/nCount/percent.mt, only show nCount<15k              
+and 2nd/3rd are DoubletFinder0.05/0.1 removed            
+
+```{r fig.width=12, fig.height=13.5}
+# 
+cowplot::plot_grid(
+VlnPlot(subset(GEX.seur,subset=nCount_RNA<15000), 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno1",cols =color.pre1),
+
+VlnPlot(subset(GEX.seur,subset=nCount_RNA<15000 & DoubletFinder0.05=="Singlet"), 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno1",cols =color.pre1),
+
+VlnPlot(subset(GEX.seur,subset=nCount_RNA<15000 & DoubletFinder0.1=="Singlet"), 
+        features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno1",cols =color.pre1),
+ncol = 1)
+```
+
+
+
+```{r}
+GEX.seur_pure <- subset(GEX.seur, subset= preAnno2 == "EOS" & DoubletFinder0.1 == "Singlet" & nCount_RNA < 5000 & percent.mt < 5)
+GEX.seur_pure
+```
+
+
+```{r fig.width=12,fig.height=5.5}
+(DimPlot(GEX.seur_pure, reduction = "umap", group.by = "preAnno1", label = T, label.size = 3.5,repel = T,
+          cols =color.pre1) + NoLegend()) +
+  (DimPlot(GEX.seur_pure, reduction = "umap", group.by = "preAnno2", label = T, label.size = 3.5,repel = T,
+          cols =color.pre2) + NoLegend())
+```
+
+
+```{r echo=FALSE, fig.height=4.5, fig.width=15.8}
+FeaturePlot(GEX.seur_pure, reduction = "umap", features = c("nFeature_RNA","nCount_RNA","percent.mt"), ncol = 3)
+```
+
+```{r}
+sum(GEX.seur$preAnno2 == "EOS")
+```
+
+```{r}
+GEX.seur_pure
+```
+
+
+```{r}
+#saveRDS(GEX.seur_pure,"scEOS.preAnno_0705.pure.rds")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

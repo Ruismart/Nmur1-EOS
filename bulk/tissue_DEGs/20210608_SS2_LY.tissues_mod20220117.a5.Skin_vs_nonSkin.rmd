@@ -1,0 +1,361 @@
+---
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+# RNAseq downstream analysis            
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#necessary packages and functions  
+source("I:/Shared_win/projects/RNA_normal/analysis.r")
+```
+         
+          
+## load expression mtx        
+
+already filtered in 'all_initial' part             
+
+```{r echo=FALSE}
+dat = './RNAseq.SS2_LY_20210608_mod20220117.filt_cpm.tissues.pc_gene.csv'
+mtxname = 'SS2_LY_20210608.tissues'
+
+# specify names of 'A vs B', and cell idx of As and Bs
+Aname = "Skin" 
+Bname = "nonSkin"  
+
+#Aidx = c()
+#Bidx = c()
+
+mat_pc <- read.table(dat, header = TRUE, stringsAsFactors = F, sep = ",")
+rownames(mat_pc) <- mat_pc$gene
+mat_pc <- mat_pc[,2:ncol(mat_pc)]
+mat_pc <- as.matrix(mat_pc)
+
+Aidx = grep("Skin",colnames(mat_pc))
+Bidx = grep("Skin",colnames(mat_pc),invert = T)
+
+# tpm
+datt = './RNAseq.SS2_LY_20210608_mod20220117.filt_tpm.tissues.pc_gene.csv'
+
+matt_pc <- read.table(datt, header = TRUE, stringsAsFactors = F, sep = ",")
+rownames(matt_pc) <- matt_pc$gene
+matt_pc <- matt_pc[,2:ncol(matt_pc)]
+matt_pc <- as.matrix(matt_pc)
+```
+
+check filtered pc(protein coding) matrix        
+```{r}
+dim(mat_pc[,c(Aidx,Bidx)])
+head(mat_pc[,c(Aidx,Bidx)])
+``` 
+
+## QC  
+
+design info  
+```{r echo=FALSE, paged.print=FALSE}
+design <- data.frame(condition=factor(c(rep(Aname,length(Aidx)),rep(Bname,length(Bidx)))),
+                     replicate=factor(colnames(mat_pc[,c(Aidx,Bidx)])))
+rownames(design) <- colnames(mat_pc[,c(Aidx,Bidx)])
+design$condition <- factor(design$condition, levels = c(Aname,Bname))
+design
+```
+
+### condition mean expression             
+
+```{r cross2, echo=FALSE, fig.height=6, fig.width=6, warning=FALSE}
+plot(data.frame(Aname=rowMeans(mat_pc[,Aidx]),
+                Bname=rowMeans(mat_pc[,Bidx])), pch=20, log = 'xy',
+     xlab = paste0("Mean normalized counts (",Aname,")"),xlim=c(0.1,100000),
+     ylab = paste0("Mean normalized counts (",Bname,")"),ylim=c(0.1,100000),
+     main = paste0(dim(mat_pc)[1]," filtered protein coding genes "))
+```
+
+### PCA          
+
+```{r include=FALSE}
+rv <- rowVars(mat_pc[,c(Aidx,Bidx)])
+selt <- order(rv, decreasing = TRUE)[seq_len(2000)]
+pca2 <- stats::prcomp(t(mat_pc[selt,c(Aidx,Bidx)]), scale.=TRUE, center= TRUE)
+#pca2$x
+
+pca_d <- as.data.frame(pca2$x)
+
+pca_d[,"condition"] = design$condition
+pca_d[,"batch"] = rownames(design)
+pca_d[,"replicate"] = design$replicate
+```
+
+```{r echo=FALSE}
+plot(pca2$sdev,pch=20, xlab="PC",ylab="Standard Variation", main="PCs of top2000 highly variable genes")
+```
+
+##### PCA summary                 
+
+```{r echo=FALSE}
+# variance
+summary(pca2)
+```
+
+```{r echo=FALSE, fig.height=7.2, fig.width=8, message=FALSE, warning=FALSE}
+#plot the PCA
+#create a classic 2-dimension PCA plot (first two principal components) with conditions and library methods indicated
+cols <- c("#481567FF","#1F968BFF","#B5640B")
+
+cols <- c(cols[3], cols[2])
+names(cols) <- c(as.character(unique(design$condition)[1]),as.character(unique(design$condition)[2]))
+
+centroids <- aggregate(cbind(PC1,PC2)~condition,pca_d,mean)
+conf.rgn <- do.call(rbind,lapply(unique(pca_d$condition),function(t)
+  data.frame(condition=as.character(t),
+             ellipse::ellipse(cov(pca_d[pca_d$condition==t,1:2]),
+                     centre=as.matrix(centroids[t,2:3]),
+                     level=0.95),
+             stringsAsFactors = FALSE)))
+
+
+#p1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition, shape=condition))
+p1 = ggplot(data=pca_d, aes(x=PC1, y=PC2, color=condition))
+p1 = p1 + geom_point(size=3.5)
+p1 = p1 + ggrepel::geom_text_repel(mapping = aes(label=pca_d$batch),size=3.5, show.legend = F, max.overlaps = 20)
+#p1 = p1 + stat_ellipse(type="norm", linetype=2)
+p1 = p1 + geom_path(data=conf.rgn)
+
+p1 = p1 + labs(title="PCA\nusing CPM(top2000 highly variable genes) ",
+               color="Condition", shape="batch")
+p1 = p1 + scale_colour_manual(values = cols) 
+#p1 = p1 + scale_shape_manual(values=c(16,17,15))
+p1
+```
+
+### tSNE       
+
+```{r echo=FALSE, message=FALSE, warning=FALSE,fig.width=8,fig.height=7.2}
+set.seed(128)
+PCs <- 1:10
+PCss <- paste0(PCs[1],":",PCs[length(PCs)])
+pca2.emb <- pca2$x %*% diag(pca2$sdev**2)
+tsne_out <- Rtsne::Rtsne(
+  as.matrix(pca2.emb[,PCs]),
+  pca = FALSE,
+  perplexity = 3,
+  max_iter = 2000
+)
+
+
+
+#cols <- c("Meninges" = "#481567FF", "nonMeninges" = "#1F968BFF")
+p6 = ggplot(data=data.frame(tsne_out$Y), aes(x=X1, y=X2)) + labs(x="tSNE_1",y="tSNE_2", seed=FALSE) + 
+  #geom_point(aes(colour=design$condition, shape=design$condition),size=3.5) + 
+  geom_point(aes(colour=design$condition),size=3.5) + 
+  #stat_ellipse(aes(colour=design$condition),type="norm", linetype=2) + 
+   ggrepel::geom_text_repel(mapping = aes(label=colnames(mat_pc[,c(Aidx,Bidx)])),size=3.5) + 
+  scale_colour_manual(values = cols) + 
+  #scale_shape_manual(values=c(16:10)) + 
+   labs(title=paste0("tSNE\nusing PC",PCss),
+               color="Condition", shape="batch")
+p6
+```
+
+### correlation        
+
+##### correlation (log2(CPM+1)) of all filtered protein-coding genes          
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=5.2,fig.height=5.2}
+  Ret_mat <- log2(mat_pc[,c(Aidx,Bidx)]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.65
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot1 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+``` 
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.tissues/correlation.all_filtered_protein_coding.pdf",
+    height = 5.2, width = 5.2)
+heatplot1
+dev.off()
+```
+
+##### correlation (log2(CPM+1)) of top2000 highly variable genes           
+
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=5.2,fig.height=5.2}
+  Ret_mat <- log2(mat_pc[selt,c(Aidx,Bidx)]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.35
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot2 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+``` 
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = "./figures.tissues/correlation.top2000_hvg.pdf",
+    height = 5.2, width = 5.2)
+heatplot2
+dev.off()
+```
+
+
+## Differential Analysis                
+
+
+```{r include=FALSE}
+ret <- run_MEedgeR(MAT = mat_pc[,c(Aidx,Bidx)], ED = Aname, WT = Bname, n1 = length(Aidx),n2 = length(Bidx),
+                         lcm = 0, padj = 0.05,lfc = log2(1.5), gsea = TRUE)
+```
+
+
+```{r}
+ret$SUM
+```
+
+```{r paged.print=FALSE}
+ret$gsea
+```
+
+```{r eval=FALSE, include=FALSE}
+write.table(ret$gsea,
+            paste0("figures.tissues/gsea_hallmark.DEGs_p0.05_FC1.5.",
+                   Aname,"_vs_",Bname,".csv"),
+            col.names = T, row.names = F, sep = ",", quote = F)
+```
+
+
+##### using cutoff: p.adjust <0.05, FC >2         
+                      
+```{r message=FALSE, warning=FALSE, include=FALSE}
+rets <- finalplot(mat_pc[,c(Aidx,Bidx)],data.frame(ret$DEG_edgeR), paste0(Aname,"_vs_",Bname), 0.05, 1.5, 
+                  Sign = FALSE, Sign_dn = 40, Sign_up = 40, padjust = TRUE)
+```
+
+```{r echo=FALSE}
+cat(paste0(Aname," vs ",Bname," \nDEGs: "),length(c(rets$up,rets$down)),
+    "\n  up: ",length(c(rets$up)),
+    "\ndown: ",length(c(rets$down)))
+```
+
+##### correlation (log2(CPM+1)) of edgeR DEGs             
+```{r echo=FALSE,message=FALSE,warning=FALSE,fig.width=5.2,fig.height=5.2}
+    Ret_mat <- log2(mat_pc[c(rets$up,rets$down),c(Aidx,Bidx)]+1)
+  Ret_cor <- cor(Ret_mat)
+  
+  lower = 0.2
+  upper = 1
+  pal <- "Reds"
+  
+  ht1 <- ComplexHeatmap::Heatmap(Ret_cor, col = circlize::colorRamp2(seq(lower, upper, ((upper-lower)/7)),RColorBrewer::brewer.pal(8, pal)),
+                  heatmap_legend_param = list(
+                  color_bar = "continuous",
+                  legend_direction = "horizontal",
+                  legend_width = unit(5, "cm"),
+                  title_position = "topcenter"),
+                  name = "Pearson correlation",
+                  column_names_gp = grid::gpar(fontsize = 10),
+                  row_names_gp = grid::gpar(fontsize = 10),
+                  top_annotation = NULL)
+  heatplot3 <- ComplexHeatmap::draw(ht1, heatmap_legend_side = "top")
+``` 
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = paste0("./figures.tissues/correlation3.edgeR_DEGs.p0.05_FC1.5.",
+                  Aname,"_vs_",Bname,".pdf"),
+    height = 5.2, width = 5.2)
+heatplot3
+dev.off()
+```
+
+### volcano plot        
+
+##### p.adjust top40 labeled, volcano         
+
+```{r echo=FALSE, fig.height=12, fig.width=15, warning=FALSE}
+rets$vol
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = paste0("./figures.tissues/volcano_edgeR.top40_label.p0.05_FC1.5.",
+                  Aname,"_vs_",Bname,".pdf"),
+    height = 12, width = 15)
+rets$vol
+dev.off()
+```
+
+### heatmap         
+
+```{r echo=FALSE, fig.height=9.6, fig.width=6.8}
+genes <- c(rets$up[1:40],rets$down[1:40])
+pheatmap::pheatmap(log2(mat_pc[genes,c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 8,
+         main = "top40 log2(CPM+1)", gaps_row = c(40), gaps_col = length(Aidx))
+```
+
+```{r echo=FALSE, fig.height=9.6, fig.width=6.8}
+color.test <- colorRampPalette(
+    c(
+      "#03047F", # deep blue
+      "white",
+      "#CC2627"  # deep red
+    )
+  )(100)
+
+pheatmap::pheatmap(log2(mat_pc[genes,c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 8, color = color.test,
+         scale = 'row',
+         main = "top40 zscore", gaps_row = c(40), gaps_col = length(Aidx))
+
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf(file = paste0("./figures.tissues/heatmap_top40_log2cpm.",
+                  Aname,"_vs_",Bname,".pdf"),
+    height = 7.6, width = 5.8)
+pheatmap::pheatmap(log2(mat_pc[genes,c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 7.2,
+         main = "top40 log2(CPM+1)", gaps_row = c(40), gaps_col = length(Aidx))
+dev.off()
+
+pdf(file = paste0("./figures.tissues/heatmap_top40_zscore.",
+                  Aname,"_vs_",Bname,".pdf"),
+    height = 7.6, width = 5.8)
+pheatmap::pheatmap(log2(mat_pc[genes,c(Aidx,Bidx)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 7.2, color = color.test,
+         scale = 'row',
+         main = "top40 zscore", gaps_row = c(40), gaps_col = length(Aidx))
+dev.off()
+```
+
+```{r eval=FALSE, include=FALSE}
+write.table(rec_gcol(data.frame(ret$DEG_edgeR)), paste0("edgeR_DEGs.tissues_a5_",
+           #paste(colnames(mat_pc)[Aidx],collapse="."),"_vs_", paste(colnames(mat_pc)[Bidx],collapse="."),".csv"),
+           paste(Aname),"_vs_", paste(Bname),".csv"),
+           col.names = TRUE, row.names = FALSE,quote=FALSE, sep=",")
+```
+
+
+
+

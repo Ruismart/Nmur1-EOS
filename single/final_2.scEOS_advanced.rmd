@@ -1,0 +1,1651 @@
+---
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+---
+
+
+# 20220623_10x_ZKW         
+
+analysis of scEOS                  
+        
+##### demo data(1/10~1/5 datasize)         
+loading 18,000 cells, expected 8,000 cells, but only called 377 cells             
+
+because of the small number of called cells:         
+first to try filtered matrix normally          
+second to try raw matrix and manually call cells using 'UMI counts > 100'           
+get 3,000 EOS cells more but with very low counts, it should be fine after increasing the datasize           
+             
+           
+##### plus data(full datasize)        
+          
+##### 1. QC and initial analysis             
+cell calling >3.6k and EOS >90%              
+with other celltypes(Epthelium/Fibroblast/Macrophage/DC/T) together        
+           
+initial clustering couldn't separate EOS into distinct subclusters        
+more likely grouped by nFeature levels instead         
+hard to give a conclusion to match bulk RNAseq data            
+             
+##### 2. cleaning-up and re-clustering           
+only EOS kept       
+naturally grouped into Nmur1+ and Nmur1- parts            
+seems like five states: Nmur1+ EOS1/2, Nmur1- EOS3/4/5       
+check markers and then merge into three only: Nmur1+ EOS1, Nmur1- EOS2/3        
+      
+          
+##### 3. trajectory         
+check monocle and RNAvelocity           
+
+
+
+            
+```{r message=FALSE, warning=FALSE}
+source("/Shared_win/projects/RNA_normal/analysis.10x.r")
+source("/Shared_win/projects/RNA_normal/analysis.r")
+```
+
+
+## load SS2 data    
+
+Nmur1 P or N, DEGs using 'FC>1.5 padj<0.01'               
+
+
+```{r include=FALSE}
+proc_DEG <- function(deg, p.cut=0.05, FC.cut = 2, padj=TRUE, abs=TRUE, mat_cut=NULL, gene_cut=NULL){
+    rownames(deg) <- deg$gene
+    
+    if(padj==TRUE){
+        deg <- deg %>% filter(padj < p.cut)
+    }else{
+        deg <- deg %>% filter(pvalue < p.cut)
+    }
+    
+    if(abs==TRUE){
+        deg <- deg %>% filter(abs(FC) > FC.cut)
+    }else if(FC.cut >0){
+        deg <- deg %>% filter(FC > FC.cut)
+    }else{
+        deg <- deg %>% filter(FC < FC.cut)
+    }
+    
+    if(!is.null(mat_cut)){
+        deg <- deg[rownames(deg) %in% rownames(mat_cut),]
+    }
+    if(!is.null(gene_cut)){
+        deg <- deg[rownames(deg) %in% gene_cut,]
+    }
+    return(deg)
+}
+```
+
+### matrix            
+
+```{r paged.print=FALSE}
+mat.SI_PN <- read.csv("/Shared_win/projects/202205_Nmur1EOS/final3.1/RNAseq.SS2_LY_20210608.filt_tpm.SI_Nmur1.pc_gene.csv")
+rownames(mat.SI_PN) <- mat.SI_PN$gene
+dim(mat.SI_PN)
+#head(mat.SI_PN)
+```
+
+```{r paged.print=FALSE}
+mat.raw <- read.csv("/Shared_win/projects/202205_Nmur1EOS/final3.1/RNAseq.SS2_LY_20210608.raw_tpm.gene.csv")
+rownames(mat.raw) <- mat.raw$gene
+dim(mat.raw)
+#head(mat.raw)
+```
+
+
+### DEGs              
+
+```{r paged.print=FALSE}
+DEG_0608.SI_PN <- read.table("/Shared_win/projects/202205_Nmur1EOS/final3.1/edgeR_DEGs.SI_Nmur1.SI_P_vs_SI_N.csv", 
+                           header = T, sep = ",")
+rownames(DEG_0608.SI_PN) <- DEG_0608.SI_PN$gene
+head(DEG_0608.SI_PN)
+```
+
+```{r}
+DEG_0608.SI_Pup <- proc_DEG(DEG_0608.SI_PN, abs = FALSE, p.cut = 0.01, FC.cut = 1.5, padj = T)$gene
+DEG_0608.SI_Pup
+```
+
+```{r}
+DEG_0608.SI_Nup <- proc_DEG(DEG_0608.SI_PN, abs = FALSE, p.cut = 0.01, FC.cut = -1.5, padj = T)$gene
+DEG_0608.SI_Nup
+```
+
+```{r}
+Aname = "SI_P" 
+Bname = "SI_N" 
+
+Aidx = grep("SI_P",colnames(mat.SI_PN))
+Bidx = grep("SI_N",colnames(mat.SI_PN))
+
+Aidx.raw = grep("SI_P",colnames(mat.raw))
+Bidx.raw = grep("SI_N",colnames(mat.raw))
+
+Aidx.filt = grep("SI_P1|SI_P3|SI_P4|SI_P5|SI_P8",colnames(mat.raw))
+Bidx.filt = grep("SI_N2|SI_N3|SI_N4|SI_N5|SI_N7|SI_N8",colnames(mat.raw))
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+rets <- finalplot(mat.SI_PN[,c(Aidx,Bidx)],data.frame(DEG_0608.SI_PN), paste0(Aname,"_vs_",Bname), 0.01, 1.5, 
+                  Sign = FALSE, Sign_dn = 40, Sign_up = 40, padjust = TRUE)
+```
+
+```{r echo=FALSE, fig.height=9, fig.width=12, warning=FALSE}
+rets$vol
+```
+
+
+## load pure obj          
+
+```{r}
+GEX.seur_pure <- readRDS("./scEOS.preAnno_0705.pure.rds")
+GEX.seur_pure
+```
+
+
+
+### check      
+
+```{r}
+GEX.seur <- GEX.seur_pure
+```
+
+```{r}
+color.pre1 <-  ggsci::pal_igv("default")(49)[c(1,5,7,31,33,
+                                               19,
+                                               16,
+                                               2)]
+color.pre2 <- ggsci::pal_igv("default")(49)[c(7,
+                                               19,
+                                               16,
+                                               2)]
+```
+
+```{r fig.width=6,fig.height=4}
+sl_stat <- table(GEX.seur$preAnno1)
+barplot(sl_stat,ylim = c(0,1100),col = color.pre1,
+        main = "preAnno1 statistics, EOS subset",cex.names = 0.75)
+text(x=1:8*1.2-0.45,y=sl_stat+75,paste0(sl_stat,"\n",100*round(as.numeric(sl_stat/sum(sl_stat)),4),"%"),cex = 0.75)
+```
+
+```{r fig.width=12,fig.height=5.5}
+(DimPlot(GEX.seur_pure, reduction = "umap", group.by = "preAnno1", label = T, label.size = 3.5,repel = T,
+          cols =color.pre1) + NoLegend()) +
+  (DimPlot(GEX.seur_pure, reduction = "umap", group.by = "preAnno2", label = T, label.size = 3.5,repel = T,
+          cols =color.pre2) + NoLegend())
+```
+
+
+
+### re-clustering        
+
+
+```{r message=FALSE, warning=FALSE,varselection,fig.width=12,fig.height=4}
+GEX.seur <- FindVariableFeatures(GEX.seur, selection.method = "vst", nfeatures = 1500)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(GEX.seur), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(GEX.seur)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+```
+
+
+```{r}
+head(VariableFeatures(GEX.seur), 200)
+```
+
+#### PCA       
+
+```{r}
+# exclude MT genes,  and more possible contamination genes
+MT_gene <- grep("^mt-",rownames(GEX.seur),value = T)
+MT_filt <- MT_gene %in% rownames(GEX.seur@assays[['RNA']]@counts)
+
+#DIG <- grep("^Tra|^Trb|^Trg|^Trd|^Tcr|^Igm|^Igh|^Igk|^Igl|Jchain|^Hsp|^Rps|^Rpl|Hbb-|Hba-|^Dnaj|^AY|^Gm|^Hist",rownames(GEX.seur),value = T)
+
+DIG <- grep("^Tra|^Trb|^Trg|^Trd|^Tcr|^Igm|^Igh|^Igk|^Igl|Jchain|Mzb1|Lars2|^Hsp|^Rps|^Rpl|Hbb-|Hba-|^Dnaj|Fos|Jun|^AY|^AW|^AA|^Gm|^Hist|^0|^1|^2|^3|^4|^5|^6|^7|^8|^9|Rik$",
+            rownames(GEX.seur),value = T)
+CC_gene <- Hmisc::capitalize(tolower(as.vector(unlist(cc.genes.updated.2019))))
+
+
+GEX.seur <- RunPCA(GEX.seur, features = setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,
+                                                  DIG, 
+                                                  CC_gene) ))
+```
+
+```{r}
+length(setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,
+                                                  DIG, 
+                                                  CC_gene)))
+```
+```{r}
+head(setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,
+                                                  DIG, 
+                                                  CC_gene)),100)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+write.table(setdiff(VariableFeatures(object = GEX.seur),
+                                                c(MT_gene,
+                                                  DIG, 
+                                                  CC_gene)), "varaible_features.txt", col.names = F, row.names = F, quote = F)
+```
+
+
+```{r fig.width=10.8,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2, group.by = "orig.ident") +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4, group.by = "orig.ident")
+```
+
+```{r fig.width=10.8,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4)
+```
+
+```{r fig.width=10.8,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2,group.by = "preAnno1", cols = color.pre1) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4,group.by = "preAnno1", cols = color.pre1)
+```
+
+here could learn that re-clustering would result in totally different subtypes          
+maybe the highly variable across all raw data including contaminated celltypes misleaded the pre-ones          
+
+
+```{r fig.width=8.8,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2,group.by = "preAnno1", split.by = "preAnno1",cols = color.pre1) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4,group.by = "preAnno1", split.by = "preAnno1", cols = color.pre1)
+```
+
+```{r fig.width=12,fig.height=12}
+DimHeatmap(GEX.seur, dims = 1:16, cells = 1500, balanced = TRUE,ncol = 4)
+```
+
+
+#### PC1 top features         
+
+```{r}
+GEX.seur@reductions$pca@feature.loadings[1:4,1:4]
+```
+
+```{r}
+PC1.feat <- as.data.frame(GEX.seur@reductions$pca@feature.loadings) %>% arrange(desc(PC_1))
+```
+
+```{r paged.print=FALSE}
+head(PC1.feat[,1:4],40)
+```
+
+```{r paged.print=FALSE}
+tail(PC1.feat[,1:4],40)
+```
+
+
+##### in SS2            
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+rets.PC1 <- finalplot(mat.SI_PN[,c(Aidx,Bidx)],data.frame(DEG_0608.SI_PN), paste0(Aname,"_vs_",Bname), 0.01, 1.5, 
+                  Sign = FALSE, Sign_dn = 40, Sign_up = 40, padjust = TRUE,Label = c(rownames(head(PC1.feat[,1:4],40)),
+                                                                                     rownames(tail(PC1.feat[,1:4],40))))
+```
+
+```{r echo=FALSE, fig.height=12, fig.width=15, warning=FALSE}
+rets.PC1$vol + labs(title = "EOS re-clustering, PC1 top40 features, check in SI Nmur1_PvsN, DEG cutoff: |FC|>1.5, p.adj<0.01")
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+rets.PC1.up <- finalplot(mat.SI_PN[,c(Aidx,Bidx)],data.frame(DEG_0608.SI_PN), paste0(Aname,"_vs_",Bname), 0.01, 1.5, 
+                  Sign = FALSE, Sign_dn = 40, Sign_up = 40, padjust = TRUE,Label = c(rownames(head(PC1.feat[,1:4],40))))
+```
+
+```{r echo=FALSE, fig.height=12, fig.width=15, warning=FALSE}
+rets.PC1.up$vol + labs(title = "EOS re-clustering, PC1 top40 features, check in SI Nmur1_PvsN, DEG cutoff: |FC|>1.5, p.adj<0.05")
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+rets.PC1.dn <- finalplot(mat.SI_PN[,c(Aidx,Bidx)],data.frame(DEG_0608.SI_PN), paste0(Aname,"_vs_",Bname), 0.01, 1.5, 
+                  Sign = FALSE, Sign_dn = 40, Sign_up = 40, padjust = TRUE,Label = c(rownames(tail(PC1.feat[,1:4],40))))
+```
+
+```{r echo=FALSE, fig.height=12, fig.width=15, warning=FALSE}
+rets.PC1.dn$vol + labs(title = "EOS re-clustering, PC1 top40 features, check in SI Nmur1_PvsN, DEG cutoff: |FC|>1.5, p.adj<0.05")
+```
+
+```{r echo=FALSE, fig.height=9.6, fig.width=4.8}
+
+pheatmap::pheatmap(log2(mat.raw[c(rownames(head(PC1.feat[,1:4],40)),rownames(tail(PC1.feat[,1:4],40))),
+                               c(Aidx.filt,Bidx.filt)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 8, 
+         #color = color.test,
+         #scale = 'row',
+         main = "EOS re-clustering, PC1 top40 features", gaps_row = c(40), gaps_col = length(Aidx.filt))
+```
+
+```{r echo=FALSE, fig.height=9.6, fig.width=4.8}
+
+pheatmap::pheatmap(log2(mat.raw[c(rownames(head(PC1.feat[,1:4],40)),rownames(tail(PC1.feat[,1:4],40))),
+                               c(Aidx.filt,Bidx.filt)]+1),cluster_rows = F, cluster_cols = F,
+         fontsize_row = 8, 
+         color = color.test,
+         scale = 'row',
+         main = "EOS re-clustering, PC1 top40 features", gaps_row = c(40), gaps_col = length(Aidx.filt))
+```
+
+
+##### surprisingly, here we could learn that Nmur1+/Nmur1- EOS are naturally separated by PC1 top features !         
+scEOS and SS2 bulk data are basically matched.        
+             
+            
+#### Run UMAP/tSNE            
+
+##### decide PCs to use          
+     
+```{r}
+ElbowPlot(GEX.seur,ndims = 40)
+```
+
+
+```{r}
+PCs <- 1:10
+```
+
+```{r}
+GEX.seur <- FindNeighbors(GEX.seur, dims = PCs, k.param = 50)
+GEX.seur <- FindClusters(GEX.seur, resolution = 0.3, method = 'igraph')
+```
+
+```{r}
+GEX.seur <- RunTSNE(GEX.seur, dims=PCs, complexity=20)
+GEX.seur <- RunUMAP(GEX.seur, dims=PCs, n.neighbors = 50)
+```
+
+
+```{r fig.width=10.5,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "tsne", label = T,group.by = "seurat_clusters") + DimPlot(GEX.seur, reduction = "umap", label = T,group.by = "seurat_clusters")
+```
+
+```{r fig.width=7.5,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "tsne", label = T,group.by = "preAnno1",split.by = "preAnno1",cols = color.pre1) + 
+  DimPlot(GEX.seur, reduction = "umap", label = T,group.by = "preAnno1",split.by = "preAnno1",cols = color.pre1)
+```
+
+```{r}
+GEX.seur$Anno1 <- as.character(GEX.seur$seurat_clusters)
+
+GEX.seur$Anno1[GEX.seur$Anno1 %in% c(1)] <- "EOS1"
+GEX.seur$Anno1[GEX.seur$Anno1 %in% c(0)] <- "EOS2"
+GEX.seur$Anno1[GEX.seur$Anno1 %in% c(2)] <- "EOS3"
+
+GEX.seur$Anno1 <- factor(GEX.seur$Anno1,
+                         levels = paste0("EOS",1:3))
+```
+
+
+```{r}
+color.A1 <- ggsci::pal_igv("default")(49)[c(2,
+                                            33,44)]
+  
+#color.A2 <- 
+```
+
+
+
+```{r fig.width=10.5,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "tsne", label = T,group.by = "Anno1",cols = color.A1) + DimPlot(GEX.seur, reduction = "umap", label = T,group.by = "Anno1",cols = color.A1)
+```
+
+```{r fig.width=10.5,fig.height=4.5}
+cowplot::plot_grid(
+AugmentPlot(DimPlot(GEX.seur, reduction = "tsne", label = T,group.by = "Anno1",cols = color.A1, pt.size = 3.2, repel = T, label.size = 12)),
+  AugmentPlot(DimPlot(GEX.seur, reduction = "umap", label = T,group.by = "Anno1",cols = color.A1, pt.size = 3.2)) ,
+  (DimPlot(GEX.seur, reduction = "umap", label = F,group.by = "Anno1",cols = color.A1, pt.size = 0,cells = c(1:50))+ theme(plot.margin = unit(c(0,1,0,2),'cm')) +
+     labs(x="",y="",title = "") + theme(axis.line.x = element_blank(),
+                                        axis.ticks.x = element_blank(),
+                                        axis.text.x = element_blank(),
+                                        axis.line.y = element_blank(),
+                                        axis.ticks.y = element_blank(),
+                                        axis.text.y = element_blank())),
+ncol = 3, rel_widths = c(4.5,4.5,1.8))
+```
+
+
+```{r fig.width=10,fig.height=4.5}
+pp.umap2 <- cowplot::plot_grid(
+AugmentPlot(DimPlot(GEX.seur, reduction = "tsne", label = F,group.by = "Anno1",cols = color.A1, pt.size = 3.2, repel = T, label.size = 12)),
+  AugmentPlot(DimPlot(GEX.seur, reduction = "umap", label = F,group.by = "Anno1",cols = color.A1, pt.size = 3.2)) ,
+  get_legend(DimPlot(GEX.seur, reduction = "umap", label = F,group.by = "Anno1",cols = color.A1)),
+ncol = 3, rel_widths = c(4.5,4.5,1))
+pp.umap2
+```
+
+
+
+```{r fig.width=10,fig.height=4.5}
+pp.umap1 <- cowplot::plot_grid(
+AugmentPlot(DimPlot(GEX.seur, reduction = "tsne", label = F,group.by = "seurat_clusters", pt.size = 3.2, repel = T, label.size = 12)),
+  AugmentPlot(DimPlot(GEX.seur, reduction = "umap", label = F,group.by = "seurat_clusters", pt.size = 3.2)) ,
+  get_legend(DimPlot(GEX.seur, reduction = "umap", label = F,group.by = "seurat_clusters")),
+ncol = 3, rel_widths = c(4.5,4.5,1))
+pp.umap1
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./figure0719/scEOS.fig1.umap_cluster.pdf",
+       plot = pp.umap1,
+       width = 10, height = 4.5)
+ggsave("./figure0719/scEOS.fig1.umap_Anno1.pdf",
+       plot = pp.umap2,
+       width = 10, height = 4.5)
+```
+
+
+
+```{r fig.width=3,fig.height=4}
+sl_stat <- table(GEX.seur$Anno1)
+barplot(sl_stat,ylim = c(0,2100),col = color.A1,
+        main = "Anno1 statistics, EOS",cex.names = 0.75)
+text(x=1:3*1.2-0.45,y=sl_stat+155,paste0(sl_stat,"\n",100*round(as.numeric(sl_stat/sum(sl_stat)),4),"%"),cex = 0.75)
+```
+
+```{r eval=FALSE, include=FALSE}
+pdf("./figure0719/scEOS.fig1.stat.pdf",
+    width = 3,height = 4)
+sl_stat <- table(GEX.seur$Anno1)
+barplot(sl_stat,ylim = c(0,2100),col = color.A1,
+        main = "Anno1 statistics, EOS",cex.names = 0.75)
+text(x=1:3*1.2-0.45,y=sl_stat+155,paste0(sl_stat,"\n",100*round(as.numeric(sl_stat/sum(sl_stat)),4),"%"),cex = 0.75)
+dev.off()
+```
+
+```{r eval=FALSE, include=FALSE}
+pp.feat1 <- FeaturePlot(GEX.seur, features = markers.SItop[1:20,]$gene, pt.size = 3.6, combine = F, cols = c("lightgrey","red"))
+pp.feat1 <- lapply(pp.feat1, AugmentPlot)
+
+pp.feat2 <- FeaturePlot(GEX.seur, features = markers.SItop[21:40,]$gene, pt.size = 3.6, combine = F)
+pp.feat2 <- lapply(pp.feat2, AugmentPlot)
+
+pp.feat3 <- FeaturePlot(GEX.seur, features = markers.SItop[41:60,]$gene, pt.size = 3.6, combine = F)
+pp.feat3 <- lapply(pp.feat3, AugmentPlot)
+
+pp.feat4 <- FeaturePlot(GEX.seur, features = markers.SItop[61:80,]$gene, pt.size = 3.6, combine = F)
+pp.feat4 <- lapply(pp.feat4, AugmentPlot)
+
+pp.feat5 <- FeaturePlot(GEX.seur, features = markers.SItop[81:100,]$gene, pt.size = 3.6, combine = F)
+pp.feat5 <- lapply(pp.feat5, AugmentPlot)
+#
+ggsave("./figure0719/scEOS.fig2.SS2_SI_unique001_020.pdf",
+       plot = cowplot::plot_grid(plotlist = pp.feat1, ncol = 4),
+       width = 12, height = 15)
+
+ggsave("./figure0719/scEOS.fig2.SS2_SI_unique021_040.pdf",
+       plot = cowplot::plot_grid(plotlist = pp.feat2, ncol = 4),
+       width = 12, height = 15)
+
+ggsave("./figure0719/scEOS.fig2.SS2_SI_unique041_060.pdf",
+       plot = cowplot::plot_grid(plotlist = pp.feat3, ncol = 4),
+       width = 12, height = 15)
+
+ggsave("./figure0719/scEOS.fig2.SS2_SI_unique061_080.pdf",
+       plot = cowplot::plot_grid(plotlist = pp.feat4, ncol = 4),
+       width = 12, height = 15)
+
+ggsave("./figure0719/scEOS.fig2.SS2_SI_unique081_100.pdf",
+       plot = cowplot::plot_grid(plotlist = pp.feat5, ncol = 4),
+       width = 12, height = 15)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+pp.feat0 <- FeaturePlot(GEX.seur, features = c("Ptprc","Itgax","Siglecf","Nmur1"), 
+                        pt.size = 3.6, combine = F, cols = c("lightgrey","red"))
+pp.feat0 <- lapply(pp.feat0, AugmentPlot)
+
+pp.feat0_legend <- lapply(c("Ptprc","Itgax","Siglecf","Nmur1"), function(x){
+  get_legend(FeaturePlot(GEX.seur, features = x, 
+                        pt.size = 3.6, combine = F, cols = c("lightgrey","red")))
+})
+
+
+ggsave("./figure0719/scEOS.fig2.EOS_markers.pdf",
+       plot = cowplot::plot_grid(plotlist = pp.feat0, ncol = 4),
+       width = 12, height = 3)
+
+ggsave("./figure0719/scEOS.fig2.EOS_markers_new.pdf",
+       plot = cowplot::plot_grid(plotlist = list(pp.feat0[[1]],pp.feat0_legend[[1]],
+                                   pp.feat0[[2]],pp.feat0_legend[[2]],
+                                   pp.feat0[[3]],pp.feat0_legend[[3]],
+                                   pp.feat0[[4]],pp.feat0_legend[[4]]), ncol = 4,
+                   rel_widths = c(4.5,1,4.5,1)),
+       width = 7.44, height = 6)
+```
+
+```{r eval=FALSE, include=FALSE}
+pp.feat00 <- FeaturePlot(GEX.seur, features = c("Ptprc","Itgax","Siglecf","Nmur1","Abcg1","Abca1"), 
+                        combine = T, cols = c("lightgrey","red"),ncol = 3)
+
+ggsave("./figure0719/scEOS.fig2.EOS_markers_vector1.pdf",
+       plot = pp.feat00,
+        width = 11.16, height = 6)
+```
+
+
+
+```{r eval=FALSE, fig.height=6, fig.width=7.44, include=FALSE}
+cowplot::plot_grid(plotlist = list(pp.feat0[[1]],pp.feat0_legend[[1]],
+                                   pp.feat0[[2]],pp.feat0_legend[[2]],
+                                   pp.feat0[[3]],pp.feat0_legend[[3]],
+                                   pp.feat0[[4]],pp.feat0_legend[[4]]), ncol = 4,
+                   rel_widths = c(4.5,1,4.5,1))
+```
+
+
+
+
+```{r fig.height=5.1, fig.width=4}
+markers.SItop <- read.csv("J:/projects_local/projects/20210608_SS2_LY/mod_20220117/tissues_comp/TissueSpecific/multi_plot/Specificity_plot.SI_top1k.mod20220530.csv", row.names = 1)
+DotPlot(GEX.seur, features = rev(markers.SItop[1:20,]$gene), group.by = "Anno1", cols = c("lightgrey","red")) + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI EOS top20 unique")
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./figure0719/scEOS.fig3.dotplot.SI_unique001_020.red.pdf",
+       plot = DotPlot(GEX.seur, features = rev(markers.SItop[1:20,]$gene), group.by = "Anno1", cols = c("lightgrey","red")) + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI EOS top20 unique"),
+       height=5.1, width=4.5)
+
+ggsave("./figure0719/scEOS.fig3.dotplot.SI_unique001_040.pdf",
+       plot = DotPlot(GEX.seur, features = rev(markers.SItop[1:40,]$gene), group.by = "Anno1") + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI EOS top40 unique"),
+       height=8.1, width=5.4)
+```
+
+
+```{r fig.width=5.5,fig.height=4.8}
+DimPlot(GEX.seur, reduction = "tsne", label = T,group.by = "Anno1",split.by = "Anno1",cols = color.A1) + 
+  DimPlot(GEX.seur, reduction = "umap", label = T,group.by = "Anno1",split.by = "Anno1",cols = color.A1)
+```
+
+```{r fig.width=10.8,fig.height=4.5}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2,group.by = "Anno1", cols = color.A1) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4,group.by = "Anno1", cols = color.A1)
+```
+
+```{r fig.width=5.5,fig.height=4.8}
+DimPlot(GEX.seur, reduction = "pca",dims = 1:2,group.by = "Anno1", split.by = "Anno1",cols = color.A1) +
+  DimPlot(GEX.seur, reduction = "pca",dims = 3:4,group.by = "Anno1", split.by = "Anno1", cols = color.A1)
+```
+
+#### recheck QC                
+
+```{r fig.width=9, fig.height=3.5}
+VlnPlot(GEX.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "preAnno1",cols =color.pre1)
+```
+
+```{r fig.width=9, fig.height=3.5}
+VlnPlot(GEX.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1, group.by = "Anno1",cols =color.A1)
+```
+
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "percent.mt", group.by = "preAnno1",cols =color.pre1) 
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 40))
+plotb <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "preAnno1",cols =color.pre1)
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 4000))
+plota + plotb
+```
+
+```{r fig.width=10,fig.height=4}
+plota <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "percent.mt", group.by = "Anno1",cols =color.A1) 
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 40))
+plotb <- FeatureScatter(GEX.seur, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", group.by = "Anno1",cols =color.A1)
+             #coord_cartesian(xlim =c(0, 40000), ylim = c(0, 4000))
+plota + plotb
+```
+
+## markers                     
+
+### check sig score               
+
+```{r}
+score.SI_Nup <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          DEG_0608.SI_Nup)
+score.SI_Pup <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          DEG_0608.SI_Pup)
+```
+
+```{r}
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SI_Nup,
+                        "score.SI_Nup")
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SI_Pup,
+                        "score.SI_Pup")
+```
+
+
+
+```{r fig.width=5, fig.height=6}
+vln.score.SI_Nup <- GEX.seur@meta.data %>%
+    ggplot(aes(Anno1, score.SI_Nup, color = Anno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS1","EOS2"),
+                                                  c("EOS2","EOS3"),
+                                                  c("EOS1","EOS3")),size=2
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+     scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI Nmur1_PvsN, Nup") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6),
+        plot.title = element_text (size = 7.5))
+
+vln.score.SI_Pup <- GEX.seur@meta.data %>%
+    ggplot(aes(Anno1, score.SI_Pup, color = Anno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS2","EOS3"),
+                                                  c("EOS1","EOS2"),
+                                                  c("EOS1","EOS3")),size=2
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+    scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI Nmur1_PvsN, Pup") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6),
+        plot.title = element_text (size = 7.5))
+#vln.score.SI_Pup
+#+ NoLegend()
+```
+
+
+```{r fig.width=8.8, fig.height=6}
+cowplot::plot_grid(
+  vln.score.SI_Nup,
+  vln.score.SI_Pup,
+  ncol = 2
+)
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./figure0719/scEOS.fig5.vln_sig.SI_Nmur1_PvsN.pdf",
+       plot = cowplot::plot_grid(
+  vln.score.SI_Nup,
+  vln.score.SI_Pup,
+  ncol = 2
+),
+       width = 6.8,height = 4)
+
+```
+
+
+
+```{r}
+#markers.SItop <- read.csv("I:/Shared_win/projects/20210608_SS2_LY/mod_20220117/tissues_comp/TissueSpecific/multi_plot/Specificity_plot.SI_top1k.mod20220530.csv", row.names = 1)
+  
+markers.SItop[1:5,]
+```
+
+```{r}
+markers.SItop[1:20,]$gene
+markers.SItop[1:40,]$gene
+```
+
+
+```{r}
+tail(markers.SItop[1:100,])
+```
+
+
+```{r fig.width=4.8, fig.height=5.6}
+vln.Anno1_SIu20 <- DotPlot(GEX.seur, features = rev(markers.SItop[1:20,]$gene), group.by = "Anno1")  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI EOS top20 unique")
+vln.Anno1_SIu20
+```
+
+
+```{r}
+dim(markers.SItop)
+```
+
+```{r}
+score.SIu20 <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          markers.SItop[1:20,]$gene)
+score.SIu40 <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          markers.SItop[1:40,]$gene)
+score.SIu100 <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          markers.SItop[1:100,]$gene)
+score.SIu262 <- calculate_signature_score(as.data.frame(GEX.seur@assays[['RNA']]@data),
+                                          markers.SItop[,]$gene)
+```
+
+```{r}
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SIu20,
+                        "score.SI_Uniq20")
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SIu20,
+                        "score.SI_Uniq40")
+
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SIu100,
+                        "score.SI_Uniq100")
+GEX.seur <- AddMetaData(GEX.seur,
+                        score.SIu262,
+                        "score.SI_Uniq262")
+```
+
+
+
+```{r fig.width=5, fig.height=6}
+vln.score.SIu20 <- GEX.seur@meta.data %>%
+    ggplot(aes(Anno1, score.SI_Uniq20, color = Anno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS2","EOS3"),
+                                                  c("EOS1","EOS2"),
+                                                  c("EOS1","EOS3")),size=2
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+     scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI-EOS unique, top20") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6),
+        plot.title = element_text (size = 7.5))
+
+vln.score.SIu40 <- GEX.seur@meta.data %>%
+    ggplot(aes(Anno1, score.SI_Uniq40, color = Anno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS2","EOS3"),
+                                                  c("EOS1","EOS2"),
+                                                  c("EOS1","EOS3")),size=2
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+    scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI-EOS unique, top40") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6),
+        plot.title = element_text (size = 7.5))
+
+vln.score.SIu100 <- GEX.seur@meta.data %>%
+    ggplot(aes(Anno1, score.SI_Uniq100, color = Anno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS2","EOS3"),
+                                                  c("EOS1","EOS2"),
+                                                  c("EOS1","EOS3")),size=2
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+    scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI-EOS unique, top100") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6),
+        plot.title = element_text (size = 7.5))
+
+vln.score.SIu262 <- GEX.seur@meta.data %>%
+    ggplot(aes(Anno1, score.SI_Uniq262, color = Anno1)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("EOS2","EOS3"),
+                                                  c("EOS1","EOS2"),
+                                                  c("EOS1","EOS3")),
+                               size=2
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+    scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI-EOS unique 262") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6),
+        plot.title = element_text (size = 7.5))
+#vln.score.SI_Pup
+#+ NoLegend()
+```
+
+
+```{r fig.width=8.8, fig.height=6}
+cowplot::plot_grid(
+  vln.score.SIu20,
+  vln.score.SIu40,
+  ncol = 2
+)
+```
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./figure0719/scEOS.fig4.vln_sig.SI_unique_1.pdf",
+       plot = cowplot::plot_grid(
+  vln.score.SIu20,
+  vln.score.SIu40,
+  ncol = 2
+),
+       width = 6.8,height = 4)
+
+ggsave("./figure0719/scEOS.fig4.vln_sig.SI_unique_2.pdf",
+       plot = cowplot::plot_grid(
+  vln.score.SIu100,
+  vln.score.SIu262,
+  ncol = 2
+),
+       width = 6.8,height = 4)
+```
+
+
+```{r fig.width=8.8, fig.height=6}
+cowplot::plot_grid(
+  vln.score.SIu100,
+  vln.score.SIu262,
+  ncol = 2
+)
+```
+
+### check markers                
+
+
+```{r fig.width=4.8, fig.height=5.6}
+vln.Anno1 <- DotPlot(GEX.seur, features = rev(c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171")), group.by = "Anno1")  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI EOS top16 unique")
+vln.Anno1
+```
+
+```{r fig.width=4.8, fig.height=7.6}
+vln.Anno1_Pup40 <- DotPlot(GEX.seur, features = rev(DEG_0608.SI_Pup[1:40]), group.by = "Anno1")  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI Nmur1 Pup top40")
+vln.Anno1_Pup40
+```
+
+```{r fig.width=4.8, fig.height=7.6}
+vln.Anno1_Nup40 <- DotPlot(GEX.seur, features = rev(DEG_0608.SI_Nup[1:40]), group.by = "Anno1")  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6)) + labs(title="Anno1, SI Nmur1 Nup top40")
+vln.Anno1_Nup40
+```
+
+```{r fig.width=9.6, fig.height=7.6}
+vln.Anno1_Pup40 + vln.Anno1_Nup40
+```
+
+#### violin              
+
+```{r fig.width=12, fig.height=12.6}
+pp.vln1 <- VlnPlot(GEX.seur, features = c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171"), group.by = "Anno1", pt.size = 0.05)  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+
+#pp.vln1 <- lapply(pp.vln1,function(vv){
+#   vv + geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+#    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+#    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+#    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+#                               method = "wilcox.test",
+#                               comparisons = list(c("EOS1","EOS2"),
+#                                                  c("EOS2","EOS3"),
+#                                                  c("EOS1","EOS3")),
+#                               ) +
+#     scale_color_manual(values = color.A1) + NoLegend()+ 
+#  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+#  
+#})
+#cowplot::plot_grid(plotlist = pp.vln1, ncol = 4)
+
+pp.vln1
+```
+
+```{r}
+#pp.vln1
+```
+
+
+#### feature              
+
+```{r fig.width=12, fig.height=9}
+FeaturePlot(GEX.seur, features = c("Klra17",
+                                   "Nmur1",
+                                   "Cdh17","Clec4a4","Dpep2","Ffar1",
+                                   "F2rl3","Sirpb1a","Cyp1b1","Cd22",
+                                   "Jaml","Dio2","Hcar2","Dpep3",
+                                   "Ptger3","Gpr171"), pt.size = 0.75)
+```
+
+```{r fig.width=12, fig.height=22.5}
+FeaturePlot(GEX.seur, features = DEG_0608.SI_Pup[1:40])
+```
+
+
+```{r fig.width=12, fig.height=22.5}
+FeaturePlot(GEX.seur, features = DEG_0608.SI_Nup[1:40])
+```
+
+
+
+```{r fig.width=12, fig.height=30}
+VlnPlot(GEX.seur, features = DEG_0608.SI_Pup[1:40], group.by = "Anno1", cols = color.A1)  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+```{r fig.width=12, fig.height=30}
+VlnPlot(GEX.seur, features = DEG_0608.SI_Nup[1:40], group.by = "Anno1", cols = color.A1)  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+
+
+### all markers                     
+
+
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+Idents(GEX.seur) <- "Anno1"
+
+#GEX.markers.pre <- FindAllMarkers(GEX.seur, only.pos = T, min.pct = 0.05,
+#                                  test.use = "MAST",
+#                                  logfc.threshold = 0.1)
+GEX.markers.pre <- read.table("10x_ZKW_GEX.markers.pure_Anno1.0719new.csv", header = TRUE, sep = ",")
+GEX.markers.pre$gene <- gsub(" ","",GEX.markers.pre$gene, fixed = TRUE)
+GEX.markers.pre %>% group_by(cluster) %>% top_n(n = 8, wt = avg_log2FC)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+# add blank for gene names to avoid excel manipulating month-like characters
+add_blank <- function(x){
+  x$gene <- paste0(" ",x$gene)
+  return(x)
+}
+
+
+write.table(add_blank(GEX.markers.pre), 
+            "10x_ZKW_GEX.markers.pure_Anno1.0719new.csv", 
+            col.names = TRUE,
+            row.names = FALSE,
+            quote = F,
+            sep = ",")
+```
+
+
+
+```{r}
+GEX.markers.pre$cluster <- factor(as.character(GEX.markers.pre$cluster),
+                          levels = levels(GEX.seur$Anno1))
+
+markers.pre_t8 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.25 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 8, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t16 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.25 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 16, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t32 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 32, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t48 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 48, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t100 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.05 & !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 100, wt = avg_log2FC/p_val_adj) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC/p_val_adj),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t64 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.1 & !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 64, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t64 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.05 & avg_log2FC >0.1 &   !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 64, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC*pct.1),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+
+markers.pre_t300 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                  #filter(pct.1>0.1 & !(gene %in% c(MT_gene,DIG, CC_gene))) %>%
+                    filter(pct.1>0.05 & avg_log2FC >0.3 & p_val_adj < 0.01 &  !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   top_n(n = 210, wt = avg_log2FC) %>%
+                   ungroup() %>%
+  arrange(desc(avg_log2FC),gene) %>%
+                             distinct(gene, .keep_all = TRUE) %>%
+                             arrange(cluster,p_val_adj))$gene
+```
+
+
+```{r fig.width=6, fig.height=9.6}
+DotPlot(GEX.seur, features = rev(markers.pre_t64[1:64]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t64[65:128]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t64[129:184]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+#DotPlot(GEX.seur, features = rev(markers.pre_t64[193:256]))  + coord_flip() + 
+#  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+#DotPlot(GEX.seur, features = rev(markers.pre_t64[257:320]))  + coord_flip() + 
+#  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+```
+
+```{r eval=FALSE, fig.height=9.6, fig.width=6, include=FALSE}
+DotPlot(GEX.seur, features = rev(markers.pre_t300[1:64]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[65:128]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[129:192]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[193:256]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[257:320]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[321:384]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[385:448]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t300[449:501]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+
+```
+
+```{r}
+"Nmur1" %in% markers.pre_t100
+```
+
+```{r fig.width=6, fig.height=9}
+DotPlot(GEX.seur, features = rev(markers.pre_t100[1:56]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t100[57:112]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t100[113:168]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t100[169:224]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+DotPlot(GEX.seur, features = rev(markers.pre_t100[225:279]))  + coord_flip() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+
+```
+
+
+```{r fig.height=35, fig.width=12}
+FeaturePlot(GEX.seur,features = markers.pre_t100[1:56])
+FeaturePlot(GEX.seur,features = markers.pre_t100[57:112])
+FeaturePlot(GEX.seur,features = markers.pre_t100[113:168])
+FeaturePlot(GEX.seur,features = markers.pre_t100[169:224])
+FeaturePlot(GEX.seur,features = markers.pre_t100[225:279])
+```
+
+
+```{r paged.print=FALSE}
+GEX.seur@meta.data[,grep("snn|ANN",colnames(GEX.seur@meta.data))] <- NULL
+head(GEX.seur@meta.data)
+```
+
+
+##### 0722add      
+
+FC > 1.2, padj< 0.01           
+
+```{r}
+markers.0722 <- (GEX.markers.pre %>% group_by(cluster) %>% 
+                    filter(pct.1>0.05 & 
+                             avg_log2FC > log2(1.2) & p_val_adj<0.01 &
+                             !(gene %in% grep("^Rps|^Rpl|^Igm|^Igh|^Igk|^Igl|Jchain",rownames(GEX.seur),value = T))) %>%
+                   ungroup() %>%
+                             arrange(cluster,p_val_adj))
+markers.0722
+```
+
+```{r eval=FALSE, include=FALSE}
+write.csv(add_blank(markers.0722), 
+            "./figure0719/scEOS.fig7.markers_Anno1.pct0.05_FC1.2_padj0.01.csv", 
+            col.names = TRUE,
+            row.names = FALSE)
+```
+
+
+```{r}
+table(markers.0722$cluster)
+table(GEX.seur$Anno1)
+```
+
+
+
+```{r fig.height=9, fig.width=9, message=FALSE, warning=FALSE}
+DoHeatmap(GEX.seur, features = markers.0722$gene, group.by = "Anno1", group.colors = color.A1) + 
+  scale_color_manual(values = color.A1) + 
+  scale_fill_gradientn(colors = color.test) 
+```
+
+```{r}
+length(markers.0722$gene)
+length(unique(markers.0722$gene))
+length(markers.0722$gene[1:470])
+length(unique(c(markers.0722$gene[1:470])))
+```
+
+
+```{r}
+scales::show_col(colorRampPalette(RColorBrewer::brewer.pal(11,"RdBu"))(256))
+scales::show_col(colorRampPalette(RColorBrewer::brewer.pal(11,"RdBu"))(128))
+scales::show_col(RColorBrewer::brewer.pal(11,"RdBu"))
+```
+
+
+```{r}
+sum(rowSums(GEX.seur@assays$RNA@scale.data)==0)
+```
+
+```{r}
+rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0]
+```
+
+add some NA markers to build manual row-gaps (unlike pheatmap, Seurat::DoHeatmap no auto-rowgaps parameter setting...)                           
+
+```{r fig.height=9, fig.width=9, message=FALSE, warning=FALSE}
+pp.heat <- DoHeatmap(GEX.seur, features = c(markers.0722$gene[1:261],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][1:2],
+                                            markers.0722$gene[262:470],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][5:6],
+                                            markers.0722$gene[471:594]), group.by = "Anno1", group.colors = color.A1,draw.lines = T, lines.width = 20, label = T, angle = 30) + 
+  scale_color_manual(values = color.A1) + 
+  scale_fill_gradientn(colors = rev(colorRampPalette(RColorBrewer::brewer.pal(11,"RdBu"))(256)), na.value = "white") 
+pp.heat 
+```
+
+```{r fig.height=5, fig.width=7, message=FALSE, warning=FALSE}
+pp.heat1 <- DoHeatmap(GEX.seur, features = c(markers.0722$gene[1:261],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][1:2],
+                                            markers.0722$gene[262:470],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][5:6],
+                                            markers.0722$gene[471:594]), 
+                      group.by = "Anno1", group.colors = color.A1,draw.lines = T, lines.width = 20, label = T, size = 3.5, angle = 25) + 
+  scale_color_manual(values = color.A1) + 
+  scale_fill_gradientn(colors = rev(colorRampPalette(RColorBrewer::brewer.pal(11,"RdBu"))(256)), na.value = "white") 
+pp.heat1 + theme(axis.text.y = element_blank())
+```
+
+```{r}
+GEX.seur@assays$RNA@scale.data[rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][c(1:2,5:6)],] <- NA
+```
+
+
+
+```{r fig.height=5, fig.width=7, message=FALSE, warning=FALSE}
+PurpleAndYellow <- function(k = 50) {
+  return(CustomPalette(low = "magenta", high = "yellow", mid = "black", k = k))
+}
+
+pp.heat2 <- DoHeatmap(GEX.seur, features = c(markers.0722$gene[1:261],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][1:2],
+                                            markers.0722$gene[262:470],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][5:6],
+                                            markers.0722$gene[471:594]), 
+                      group.by = "Anno1", group.colors = color.A1,draw.lines = T, lines.width = 10, label = T, size = 3.5, angle = 25) + 
+  scale_color_manual(values = color.A1) +
+  scale_fill_gradientn(colors = PurpleAndYellow(), na.value = "white") 
+pp.heat2 + theme(axis.text.y = element_blank())
+```
+
+```{r}
+RColorBrewer::brewer.pal(11,"RdBu")
+```
+
+
+```{r fig.height=5, fig.width=7, message=FALSE, warning=FALSE}
+BludAndRed <- function(k = 50) {
+  return(CustomPalette(low = "#053061", high = "#67001F", mid = "white", k = k))
+}
+
+pp.heat3 <- DoHeatmap(GEX.seur, features = c(markers.0722$gene[1:261],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][10:12],
+                                            markers.0722$gene[262:470],
+                                            rownames(GEX.seur)[rowSums(GEX.seur@assays$RNA@scale.data)==0 & rowSums(GEX.seur@assays$RNA@data)==0][7:9],
+                                            markers.0722$gene[471:594]), 
+                      group.by = "Anno1", group.colors = color.A1,draw.lines = T, lines.width = 20, label = T, size = 3.5, angle = 25) + 
+  scale_color_manual(values = color.A1) +
+  scale_fill_gradientn(colors = BludAndRed(), na.value = "white") 
+pp.heat3 + theme(axis.text.y = element_blank())
+```
+
+
+```{r eval=FALSE, include=FALSE}
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.big.pdf",
+       plot = pp.heat,
+       width = 9,height = 9)
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.small.pdf",
+       plot = pp.heat1,
+       width = 6,height = 5)
+
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.big_noname.pdf",
+       plot = pp.heat+ theme(axis.text.y = element_blank()),
+       width = 9,height = 9)
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.small_noname.pdf",
+       plot = pp.heat1+ theme(axis.text.y = element_blank()),
+       width = 6,height = 5)
+
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.big_noname.pdf",
+       plot = pp.heat+ theme(axis.text.y = element_blank()),
+       width = 9,height = 9)
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.small_noname.pdf",
+       plot = pp.heat1+ theme(axis.text.y = element_blank()),
+       width = 6,height = 5)
+
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.big_noname_black.pdf",
+       plot = pp.heat2+ theme(axis.text.y = element_blank()),
+       width = 9,height = 9)
+ggsave("./figure0719/scEOS.fig7.doheatmap_markers.small_noname_black.pdf",
+       plot = pp.heat2+ theme(axis.text.y = element_blank()),
+       width = 6,height = 5)
+
+
+```
+
+
+
+```{r}
+pp.heat$data$gGroup <- pp.heat$data$Feature
+#pp.heat$layers
+```
+
+```{r}
+head(markers.0722)
+```
+
+```{r}
+1822848/594
+```
+
+```{r}
+#saveRDS(GEX.seur,"./scEOS.pure_Anno1_0719.rds")
+#GEX.seur <- readRDS("./scEOS.pure_Anno1_0719.rds")
+```
+
+## public data                           
+
+the only available public sc-dataset of mouse SI EOS is GSE182001,             
+(https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE182001)             
+the processed matrices were downloaded to analyze as https://github.com/TheMoorLab/Eosinophils_scRNASeq for local comparison                                    
+         
+        
+on the other hand, the raw fastq files were downloaded to run a locally built BD_WTA pipeline with Nmur1-fixed mm10 version index,          
+unfortunately, though the Nmur1-signal on extending exons were indeed detected,            
+none of them remained expressed in filtered EOS cells from any tissues        
+         
+         
+the public data and local data of scEOS are finally not consistently comparable for some reasons,         
+which might need further confirmation expecially from a third team maybe             
+
+
+
+### BD data            
+```{r}
+BD.seur <- readRDS("J:/projects_local/projects/202202_BD_WTA/repeat_analysis/public_scEOS.pre0226.rds")
+BD.seur
+```
+
+```{r paged.print=FALSE}
+head(BD.seur@meta.data)
+```
+
+```{r}
+unique(BD.seur$orig.ident)
+```
+
+```{r}
+BD.seur_SI <- subset(BD.seur, subset = orig.ident == "SI" & Anno %in% c("EOSprogenitors",
+                                                                        "immatureEOS",
+                                                                        "circulatingEOS",
+                                                                        "basalEOS",
+                                                                        "activeEOS"))
+BD.seur_SI
+```
+
+```{r fig.width=12,fig.height=4.5}
+DimPlot(BD.seur, reduction = "umap", label = T, group.by = "Anno") +
+  DimPlot(BD.seur_SI, reduction = "umap", label = T, group.by = "Anno")
+```
+
+```{r fig.width=9, fig.height=3.5}
+VlnPlot(BD.seur, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0, group.by = "Anno")
+```
+
+```{r fig.width=9, fig.height=3.5}
+VlnPlot(BD.seur_SI, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.05, group.by = "Anno")
+```
+
+```{r fig.width=9, fig.height=3.5}
+VlnPlot(subset(BD.seur_SI, subset= nFeature_RNA < 2000), features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.05, group.by = "Anno")
+```
+
+
+
+```{r}
+table(data.frame(Anno=BD.seur$Anno,Tissue=BD.seur$orig.ident))
+```
+
+
+```{r fig.width=9, fig.height=4.4}
+pheatmap::pheatmap(t(table(data.frame(Anno=BD.seur$Anno,Tissue=BD.seur$orig.ident)))[,1:5,drop=F],
+                   main = "Cell Count, public BD data",show_rownames = T, legend = F,
+                   cluster_rows = F, cluster_cols = F, display_numbers = T, number_format = "%.0f")
+```
+
+```{r fig.width=9, fig.height=4.4}
+pheatmap::pheatmap(100*rowRatio(t(table(data.frame(Anno=BD.seur$Anno,Tissue=BD.seur$orig.ident)))[,1:5,drop=F]),
+                   main = "Cell Percentage, public BD data",show_rownames = T, legend = F,
+                   cluster_rows = F, cluster_cols = F, display_numbers = T, number_format = "%.2f")
+```
+
+
+```{r}
+table(data.frame(Anno=BD.seur_SI$Anno,drop=F))
+```
+
+```{r fig.width=5, fig.height=2.4}
+pheatmap::pheatmap(t(table(data.frame(Anno=BD.seur_SI$Anno,drop=F)))[,1:5,drop=F],
+                   main = "Cell Count, SI EOS",show_rownames = F, legend = F,
+                   cluster_rows = F, cluster_cols = F, display_numbers = T, number_format = "%.0f")
+```
+
+```{r fig.width=5, fig.height=2.4}
+pheatmap::pheatmap(100*rowRatio(t(table(data.frame(Anno=BD.seur_SI$Anno,drop=F)))[,1:5,drop=F]),
+                   main = "Cell Percentage, SI EOS",show_rownames = F, legend = F,
+                   cluster_rows = F, cluster_cols = F, display_numbers = T, number_format = "%.2f")
+```
+
+
+
+```{r}
+## BD markers 
+markers.EOS <- c("Ptprc","Ccr3","Siglecf","Itgax",
+                 "Ear2","Ear6","Epx","Il5ra")
+
+markers.c8 <-  c("Epcam","Krt8","Krt18","Cdh1")
+
+markers.c10 <- c("Cygb","Clec3b","Fn1","Col1a1",  # Fibroblast
+                 "Acta2","Cnn1","Myl9","Tpm2", # SMC
+                  "Pecam1","Icam2","Cdh5","Esam",     # Endotheliocyte
+                  "Kdr","Apold1","Flt1","Ptprb")
+
+markers.c5.9 <- c("C1qa","C1qb","C1qc","Mrc1",   # Macrophage
+                                   "Cd74","Cd83","H2-Aa","H2-Eb1",
+                                   "Mki67","Top2a","Mcm3","Mcm6")
+
+markers.c11.12 <- c("Cd19","Cd79a","Cd79b","Pax5",
+                                   "Rag1","Vpreb3","Ms4a1","Cd22")
+
+markers.c6.7.13 <- c("S100a8","S100a9","Clec4d","Clec7a",
+                                   "Mmp8","Mmp9","Top2a","Pcna")
+
+
+final.markers <- c("Mki67", "Tuba1b", "Epx", "Prg3", "Prg2","Ear1","Ear2", "Ear6",  "Cd63", "Cebpe",
+                   "Alox15", "Aldh2", "S100a9", "S100a6", "S100a10", "Il5", "Retnla", "Ccl9", "Il1rl1", 
+                   "Cd24a", "Mmp9", "Icosl", "Il4", "Tgfb1", "Pirb", "Rara", "Cd80", "Cd274", "Ptgs2", "Il1rn", "Il1b", 
+                   "Vegfa", "Ccl3", "Cxcl2", "Il16", "Tnf")
+```
+
+
+```{r  fig.width=10.8, fig.height=3.4}
+mapal <- colorRampPalette(RColorBrewer::brewer.pal(4,"Spectral"))(120)
+DotPlot(BD.seur, features = unique(c(markers.EOS,
+                                      markers.c8,
+                                      markers.c10,
+                                      markers.c5.9,
+                                      markers.c6.7.13,
+                                      markers.c11.12
+                                      )), group.by = "Anno") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))+ scale_color_gradientn(colors = rev(mapal))
+```
+
+```{r   fig.width=9, fig.height=3.4}
+DotPlot(BD.seur, features = final.markers, group.by = "Anno") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))+ scale_color_gradientn(colors = rev(mapal))
+```
+
+
+#### SI EOS               
+
+
+```{r  fig.width=10.8, fig.height=3.4}
+DotPlot(BD.seur_SI, features = unique(c(markers.EOS,
+                                      markers.c8,
+                                      markers.c10,
+                                      markers.c5.9,
+                                      markers.c6.7.13,
+                                      markers.c11.12
+                                      )), group.by = "Anno") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))+ scale_color_gradientn(colors = rev(mapal))
+```
+
+```{r   fig.width=9, fig.height=3.4}
+DotPlot(BD.seur_SI, features = final.markers, group.by = "Anno") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))+ scale_color_gradientn(colors = rev(mapal))
+```
+
+
+#### localdata                      
+
+```{r  fig.width=10.5, fig.height=3.4}
+DotPlot(GEX.seur, features = unique(c(markers.EOS,
+                                      markers.c8,
+                                      markers.c10,
+                                      markers.c5.9,
+                                      markers.c6.7.13,
+                                      markers.c11.12
+                                      )), group.by = "Anno1") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))+ scale_color_gradientn(colors = rev(mapal))
+```
+
+```{r  fig.width=9, fig.height=3.4}
+DotPlot(GEX.seur, features = final.markers, group.by = "Anno1") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))+ scale_color_gradientn(colors = rev(mapal))
+```
+
+
+### check sig score               
+
+```{r}
+score.BDSI_Nup <- calculate_signature_score(as.data.frame(BD.seur_SI@assays[['RNA']]@data),
+                                          DEG_0608.SI_Nup)
+score.BDSI_Pup <- calculate_signature_score(as.data.frame(BD.seur_SI@assays[['RNA']]@data),
+                                          DEG_0608.SI_Pup)
+```
+
+```{r}
+BD.seur_SI <- AddMetaData(BD.seur_SI,
+                        score.BDSI_Nup,
+                        "score.SI_Nup")
+BD.seur_SI <- AddMetaData(BD.seur_SI,
+                        score.BDSI_Pup,
+                        "score.SI_Pup")
+```
+
+
+```{r fig.width=5, fig.height=6}
+vln.score.BDSI_Nup <- BD.seur_SI@meta.data %>%
+    ggplot(aes(Anno, score.SI_Nup, color = Anno)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("activeEOS","basalEOS"),
+                                                  c("basalEOS","circulatingEOS"),
+                                                  c("basalEOS","immatureEOS")),
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+     #scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI Nmur1_PvsN, Nup") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+
+vln.score.BDSI_Pup <- BD.seur_SI@meta.data %>%
+    ggplot(aes(Anno, score.SI_Pup, color = Anno)) +
+    geom_violin(draw_quantiles=c(0.25,0.75),trim = FALSE) +
+    #ylim(c(-0.25,0.35)) +
+    ggbeeswarm::geom_quasirandom(size = 0.01, width = 0.2, alpha = 0.3) +
+    stat_summary(fun=mean, geom="point", shape=18, size=3, color="black") +
+    ggpubr::stat_compare_means(aes(lable = ..p.signif..), 
+                               method = "wilcox.test",
+                               comparisons = list(c("activeEOS","basalEOS"),
+                                                  c("basalEOS","circulatingEOS"),
+                                                  c("basalEOS","immatureEOS")),
+                               #label.y = c(0.15,0.2,0.15,0.2,0.17,0.1)
+                               ) +
+    #scale_color_manual(values = color.A1) +
+    labs(x="",title="Signature Score of SI Nmur1_PvsN, Pup") +
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          panel.background = element_blank(), 
+          panel.border = element_rect(fill = NA)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9.6))
+#vln.score.SI_Pup
+#+ NoLegend()
+```
+
+
+```{r fig.width=10, fig.height=6}
+cowplot::plot_grid(
+  vln.score.BDSI_Nup,
+  vln.score.BDSI_Pup,
+  ncol = 2
+)
+```
+
+
+through marker comparison and reference mapping,        
+seems like our EOS1/2/3 all expressed some of their activeEOS markers,                       
+and most cells mapped to activeEOS            
+           
+using signature score,                  
+their activeEOS is more like our Nmur1+ EOS1             
+       
+also tried re-clustering of SI-EOS on public data,           
+but still not totally the same, not sure why,         
+the issue of profiling different tissue subtypes might be caused by several steps like mice/sorting/library/sequencing              
+         
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
